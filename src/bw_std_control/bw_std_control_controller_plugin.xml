@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<library path="standard_base_controller">
+  <class
+    name="bw_std_control/StandardBaseController"
+    type="bw_std_control::StandardBaseController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>Standard robot body velocity controller with an independent watchdog.</description>
+  </class>
+</library>
