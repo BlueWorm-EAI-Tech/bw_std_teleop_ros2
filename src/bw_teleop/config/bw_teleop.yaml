@@ -1,0 +1,55 @@
+bw_teleop:
+  ros__parameters:
+    publish_frequency_hz: 90.0
+    watchdog_timeout_ms: 200
+    joint_state_timeout_ms: 200
+    arm_pose_timeout_ms: 200
+    long_press_sec: 1.0
+    input_joystick_deadzone: 0.15
+    command_joystick_deadzone: 0.08
+
+    bind_ip: 0.0.0.0
+    port: 12345
+    single_client_lock_enabled: true
+    client_lock_timeout_sec: 3.0
+    poll_period_ms: 2
+    max_packets_per_cycle: 64
+
+    target_frame: C_Link
+    base_frame_id: base_link
+
+    topics.joint_states_input: /joint_states
+    topics.left_measured_pose_input: /current_left_pose
+    topics.right_measured_pose_input: /current_right_pose
+    topics.left_target_output: /target_left_pose
+    topics.right_target_output: /target_right_pose
+    topics.gripper_command_output: /gripper_controller/commands
+    topics.lift_command_output: /lift_controller/commands
+    topics.base_command_output: /base_controller/reference
+
+    joints.left_gripper: A_left_Degree8_joint
+    joints.right_gripper: A_right_Degree8_joint
+    joints.lift: C_joint
+
+    left_reset_position: [0.27, 0.25, -0.15]
+    left_reset_orientation: [0.0, 0.0, 0.0, 1.0]
+    right_reset_position: [0.27, -0.25, -0.15]
+    right_reset_orientation: [0.0, 0.0, 0.0, 1.0]
+    workspace_min: [0.10, -0.80, -0.60]
+    workspace_max: [0.90, 0.80, 0.50]
+    relative_position_scale: 1.0
+    absolute_position_scale: 1.0
+
+    gripper_min: 0.0
+    gripper_max: 0.04965
+
+    base_max_forward: 0.50
+    base_max_lateral: 0.35
+    base_max_yaw: 0.80
+    base_speed_scales: [0.25, 0.50, 1.0]
+    base_initial_gear: 0
+
+    lift_min: -0.231
+    lift_max: 0.231
+    lift_initial_position: 0.0
+    lift_jog_speed: 0.10
