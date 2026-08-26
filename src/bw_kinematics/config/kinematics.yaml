@@ -1,0 +1,19 @@
+kinematics_node:
+  ros__parameters:
+    root_link: C_Link
+    left_tip_link: A_left_Degree7_link
+    right_tip_link: A_right_Degree7_link
+    joint_state_topic: /joint_states
+    left_target_topic: /target_left_pose
+    right_target_topic: /target_right_pose
+    left_current_pose_topic: /current_left_pose
+    right_current_pose_topic: /current_right_pose
+    trajectory_topic: /dual_arm_controller/joint_trajectory
+    joint_state_timeout_ms: 200
+    max_iterations: 40
+    damping: 0.05
+    max_joint_step: 0.04
+    position_tolerance: 0.001
+    orientation_tolerance: 0.008726646259971648
+    joint_centering_gain: 0.02
+    trajectory_duration_sec: 0.08
