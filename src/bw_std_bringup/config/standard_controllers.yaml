@@ -1,0 +1,52 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    dual_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    gripper_controller:
+      type: position_controllers/JointGroupPositionController
+    lift_controller:
+      type: position_controllers/JointGroupPositionController
+    base_controller:
+      type: bw_std_control/StandardBaseController
+
+dual_arm_controller:
+  ros__parameters:
+    joints:
+      - A_left_Degree1_joint
+      - A_left_Degree2_joint
+      - A_left_Degree3_joint
+      - A_left_Degree4_joint
+      - A_left_Degree5_joint
+      - A_left_Degree6_joint
+      - A_left_Degree7_joint
+      - A_right_Degree1_joint
+      - A_right_Degree2_joint
+      - A_right_Degree3_joint
+      - A_right_Degree4_joint
+      - A_right_Degree5_joint
+      - A_right_Degree6_joint
+      - A_right_Degree7_joint
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_partial_joints_goal: false
+    open_loop_control: false
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+
+gripper_controller:
+  ros__parameters:
+    joints: [A_left_Degree8_joint, A_right_Degree8_joint]
+
+lift_controller:
+  ros__parameters:
+    joints: [C_joint]
+
+base_controller:
+  ros__parameters:
+    command_timeout_sec: 0.1
+    max_vx: 0.5
+    max_vy: 0.5
+    max_wz: 0.8
