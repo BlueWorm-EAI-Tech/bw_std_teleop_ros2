@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="standard" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="use_mock_hardware" default="false"/>
+  <xacro:arg name="serial_port" default="/dev/ttyACM0"/>
+  <xacro:arg name="baud_rate" default="2000000"/>
+  <xacro:arg name="feedback_timeout_ms" default="100"/>
+  <xacro:arg name="power_on_on_activate" default="false"/>
+  <xacro:arg name="arm_mapping_calibrated" default="false"/>
+  <xacro:arg name="left_arm_motor_indices" default="0,1,2,3,4,5,6"/>
+  <xacro:arg name="right_arm_motor_indices" default="0,1,2,3,4,5,6"/>
+  <xacro:arg name="left_arm_direction" default="1,1,1,1,1,1,1"/>
+  <xacro:arg name="right_arm_direction" default="1,1,1,1,1,1,1"/>
+  <xacro:arg name="left_arm_raw_zero_rad" default="0,0,0,0,0,0,0"/>
+  <xacro:arg name="right_arm_raw_zero_rad" default="0,0,0,0,0,0,0"/>
+  <xacro:arg name="arm_max_velocity_rad_s" default="0.05"/>
+  <xacro:arg name="pelvis_max_velocity_mm_s" default="20.0"/>
+  <xacro:arg name="gripper_max_velocity_normalized_s" default="0.2"/>
+
+  <xacro:include filename="standard.urdf"/>
+  <xacro:include filename="standard.ros2_control.xacro"/>
+
+  <xacro:standard_ros2_control
+    name="StandardSystem"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    serial_port="$(arg serial_port)"
+    baud_rate="$(arg baud_rate)"
+    feedback_timeout_ms="$(arg feedback_timeout_ms)"
+    power_on_on_activate="$(arg power_on_on_activate)"
+    arm_mapping_calibrated="$(arg arm_mapping_calibrated)"
+    left_arm_motor_indices="$(arg left_arm_motor_indices)"
+    right_arm_motor_indices="$(arg right_arm_motor_indices)"
+    left_arm_direction="$(arg left_arm_direction)"
+    right_arm_direction="$(arg right_arm_direction)"
+    left_arm_raw_zero_rad="$(arg left_arm_raw_zero_rad)"
+    right_arm_raw_zero_rad="$(arg right_arm_raw_zero_rad)"
+    arm_max_velocity_rad_s="$(arg arm_max_velocity_rad_s)"
+    pelvis_max_velocity_mm_s="$(arg pelvis_max_velocity_mm_s)"
+    gripper_max_velocity_normalized_s="$(arg gripper_max_velocity_normalized_s)"/>
+</robot>
