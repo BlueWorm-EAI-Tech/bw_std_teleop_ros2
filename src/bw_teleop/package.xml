@@ -5,7 +5,7 @@
   <version>0.1.0</version>
   <description>Standard 机器人单节点 VR 遥操作与 UDP 接入</description>
   <maintainer email="chenpeel@foxmail.com">BlueWorm Robotics</maintainer>
-  <license>Apache-2.0</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
