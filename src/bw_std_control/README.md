@@ -7,7 +7,8 @@ Standard `ros2_control` 控制包:
 - `StandardHeadController`: 头部 command-only GPIO 控制器.
 - frame codec, 反馈 handoff, 固定容量命令队列与命令安全检查.
 
-模型与接口契约由 `bw_std_description` 提供, 部署组合由 `bw_std_bringup` 提供.
+模型与接口契约由 `bw_std_bringup/urdf` 提供, mesh 来自 submodule `bw_std_description`,
+部署组合由 `bw_std_bringup` 提供.
 
 ## 资源契约
 

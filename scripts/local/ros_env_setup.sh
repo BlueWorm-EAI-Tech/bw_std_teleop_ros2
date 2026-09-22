@@ -20,6 +20,9 @@ FISHROS_URL="${BW_ROS_ENV_SETUP_FISHROS_URL:-https://fishros.com/install}"
 DEFAULT_ROSDISTRO_INDEX_URL="https://mirrors.tuna.tsinghua.edu.cn/rosdistro/index-v4.yaml"
 ROSDISTRO_INDEX_URL_VALUE=""
 CASADI_ROSDEP_KEY="casadi"
+GAZEBO_ROS_ROSDEP_KEY="gazebo_ros"
+GAZEBO_ROS_PACKAGE=""
+ROSDEP_SKIP_KEYS=()
 ROS_TARGET_DISTRO=""
 UBUNTU_VERSION=""
 UBUNTU_CODENAME=""
@@ -36,7 +39,7 @@ usage() {
   ./scripts/local/ros_env_setup.sh --apply
 
 选项：
-  --check  只读检查 Ubuntu、ROS 2、ros2_control、Pinocchio 和 CasADi(robotpkg) 依赖
+  --check  只读检查 Ubuntu、ROS 2、ros2_control、Pinocchio、CasADi(robotpkg)、Gazebo Classic 与 submodule 依赖
   --apply  确认后安装依赖(含 robotpkg 提供的 CasADi 3.7)、配置 Zsh，并执行 colcon build
   --help   显示帮助
 EOF
@@ -97,6 +100,17 @@ read_package_file() {
 load_dependency_packages() {
   read_package_file "${SYSTEM_TOOLS_FILE}" SYSTEM_PACKAGES
   read_package_file "${ROS_DEV_TOOLS_FILE}" ROS_PACKAGES
+
+  # casadi 无上游 rosdep 规则，固定跳过并由 robotpkg 提供。
+  ROSDEP_SKIP_KEYS=("${CASADI_ROSDEP_KEY}")
+  # Gazebo Classic 只发行到 Humble；Jazzy 无 gazebo_ros 规则，只能显式跳过。
+  if [[ "${ROS_TARGET_DISTRO}" == "humble" ]]; then
+    GAZEBO_ROS_PACKAGE="ros-${ROS_TARGET_DISTRO}-gazebo-ros"
+    ROS_PACKAGES+=("${GAZEBO_ROS_PACKAGE}")
+  else
+    GAZEBO_ROS_PACKAGE=""
+    ROSDEP_SKIP_KEYS+=("${GAZEBO_ROS_ROSDEP_KEY}")
+  fi
 }
 
 # 解析并校验 rosdep 索引 URL，默认使用清华镜像，避免访问 raw.githubusercontent.com 超时。
@@ -138,7 +152,34 @@ check_build_tools() {
   command -v cmake >/dev/null 2>&1 &&
     command -v colcon >/dev/null 2>&1 &&
     command -v rosdep >/dev/null 2>&1 &&
+    command -v tmux >/dev/null 2>&1 &&
     command -v zsh >/dev/null 2>&1
+}
+
+# submodule 未拉取('-' 前缀)或提交不匹配('+' 前缀)时视为未就绪; 无 .gitmodules 视为就绪。
+submodules_are_ready() {
+  local status_line=""
+
+  [[ -f "${REPO_ROOT}/.gitmodules" ]] || return 0
+  while IFS= read -r status_line; do
+    case "${status_line}" in
+      "-"* | "+"*) return 1 ;;
+    esac
+  done < <(git -C "${REPO_ROOT}" submodule status --recursive 2>/dev/null)
+  return 0
+}
+
+sync_submodules() {
+  [[ -f "${REPO_ROOT}/.gitmodules" ]] || return 0
+  if submodules_are_ready; then
+    printf '[跳过] submodule 已就绪\n'
+    return 0
+  fi
+
+  printf '[拉取] git submodule update --init --recursive\n'
+  git -C "${REPO_ROOT}" submodule update --init --recursive
+  submodules_are_ready ||
+    die "submodule 未就绪：检查 ${REPO_ROOT}/.gitmodules 的 URL 与网络访问"
 }
 
 check_ros_packages() {
@@ -169,11 +210,17 @@ casadi_uses_new_abi() {
   [[ "${symbols}" == *NSt7__cxx1112basic_string* ]]
 }
 
+# gazebo_ros 只由 upstream bw_std_description 的显示入口使用，仅 Humble 有发行版。
+check_gazebo_ros() {
+  [[ -n "${GAZEBO_ROS_PACKAGE}" ]] || return 0
+  ros2 pkg prefix gazebo_ros >/dev/null 2>&1
+}
+
 check_rosdep_dependencies() {
   export ROSDISTRO_INDEX_URL="${ROSDISTRO_INDEX_URL_VALUE}"
   rosdep check --from-paths "${REPO_ROOT}/src" --ignore-src \
     --rosdistro "${ROS_TARGET_DISTRO}" \
-    --skip-keys "${CASADI_ROSDEP_KEY}" >/dev/null 2>&1
+    --skip-keys "${ROSDEP_SKIP_KEYS[*]}" >/dev/null 2>&1
 }
 
 check_environment() {
@@ -181,11 +228,15 @@ check_environment() {
 
   printf '[OK] Ubuntu %s -> ROS 2 %s\n' "${UBUNTU_VERSION}" "${ROS_TARGET_DISTRO}"
   report_check "ROS 2 ${ROS_TARGET_DISTRO}" ros_is_ready || missing=1
-  report_check "构建工具（cmake/colcon/rosdep/zsh）" check_build_tools || missing=1
+  report_check "构建与托管工具（cmake/colcon/rosdep/tmux/zsh）" check_build_tools || missing=1
+  report_check "工作区 submodule（含 src/bw_std_description）" submodules_are_ready || missing=1
   if ros_is_ready; then
     source_ros_environment
     report_check "ros2_control、ROS 2 Controllers、Pinocchio 与 xacro" check_ros_packages || missing=1
-    report_check "工作区 rosdep 依赖（casadi 由本脚本负责）" check_rosdep_dependencies || missing=1
+    if [[ -n "${GAZEBO_ROS_PACKAGE}" ]]; then
+      report_check "Gazebo Classic（${GAZEBO_ROS_PACKAGE}）" check_gazebo_ros || missing=1
+    fi
+    report_check "工作区 rosdep 依赖（casadi/gazebo_ros 由本脚本按发行版处理）" check_rosdep_dependencies || missing=1
   fi
   report_check "CasADi 3.7 核心库与 sqpmethod/qrqp 插件（robotpkg，${INSTALL_PREFIX}）" casadi_is_ready || missing=1
 
@@ -204,6 +255,8 @@ confirm_apply() {
   - 使用 sudo 更新 APT 并安装系统/ROS 依赖
   - ROS 缺失时下载并交互执行 FishROS 安装脚本
   - 初始化或更新 rosdep；casadi 无上游 rosdep 规则，由脚本显式 skip 并由 robotpkg 提供
+  - Gazebo Classic 仅 Humble 提供发行版：Humble 安装 ${GAZEBO_ROS_PACKAGE}，Jazzy 无对应包，rosdep 跳过 gazebo_ros
+  - 构建前执行 git submodule update --init --recursive 拉取 src/bw_std_description（默认 https 访问 GitHub）
   - 写入 robotpkg APT 源并安装 ${CASADI_PACKAGE}(CasADi 3.7 二进制)到 ${ROBOTPKG_PREFIX}
   - 更新 ${ZSHRC_FILE} 中带边界标记的项目环境区块（CASADIPATH/LD_LIBRARY_PATH/CMAKE_PREFIX_PATH）
   - 使用发行版隔离目录执行 colcon build --symlink-install
@@ -252,7 +305,7 @@ install_rosdep_dependencies() {
   rosdep update
   rosdep install --from-paths "${REPO_ROOT}/src" --ignore-src -r -y \
     --rosdistro "${ROS_TARGET_DISTRO}" \
-    --skip-keys "${CASADI_ROSDEP_KEY}"
+    --skip-keys "${ROSDEP_SKIP_KEYS[*]}"
 }
 
 robotpkg_source_is_ready() {
@@ -368,6 +421,7 @@ apply_environment() {
   install_casadi
   export_casadi_environment
   configure_zsh_environment
+  sync_submodules
   check_environment
   build_workspace
   printf '[OK] 环境配置和工作区构建完成\n'

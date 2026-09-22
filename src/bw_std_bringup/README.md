@@ -1,7 +1,16 @@
 # bw_std_bringup
 
 Standard ros2_control, 运动学与 VR 遥操作链路的部署组合包; 只保存 Launch, controller
-manager 配置与启动顺序.
+manager 配置, 模型契约与启动顺序.
+
+## 模型契约
+
+- `urdf/standard.urdf`: 几何, joint origin, axis, 惯性与 visual/collision 真源.
+- `urdf/standard.xacro`: 真机与 Mock 组合入口, 也是 `robot_description` 唯一入口.
+- `urdf/standard.ros2_control.xacro`: 统一 ros2_control joint/GPIO 接口.
+- mesh 与显示模型来自 upstream submodule `src/bw_std_description`, URDF 以
+  `package://bw_std_description/meshes/...` 引用; 该 submodule 无 ros2_control 与 mimic,
+  不参与运行时契约.
 
 ## 启动入口
 
@@ -79,7 +88,7 @@ command_rate_hz=200.0    # 2 Mbaud 带宽约束, 见 bw_std_control README
 ## 运行时连接
 
 ```text
-standard.xacro
+bw_std_bringup/urdf/standard.xacro
    |
    +-> robot_state_publisher
    +-> ros2_control_node

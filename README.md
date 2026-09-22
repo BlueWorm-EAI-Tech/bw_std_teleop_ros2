@@ -4,11 +4,11 @@
 
 ```
 src/
-├── bw_std_description/  # URDF、mesh、mimic、限位与 ros2_control 契约
+├── bw_std_description/  # submodule: mesh 与显示模型 (BlueWorm-EAI-Tech/bw_std_description)
 ├── bw_std_control/      # 串口、SystemInterface、底盘与头部控制器
 ├── bw_teleop/           # 单节点 PICO UDP 接入与遥操作编排
 ├── bw_kinematics/       # 双臂运动学编排与 Algorithm Provider
-└── bw_std_bringup/      # 控制器配置、真机和 mock 启动入口
+└── bw_std_bringup/      # 控制器配置、模型契约 (urdf)、真机和 mock 启动入口
 ```
 
 ## 运行时数据流
@@ -32,6 +32,24 @@ controller_manager -> StandardSystemHardware -> 串口帧 (0x01/0x21)
 
 支持 Ubuntu 22.04 / ROS 2 Humble, 兼容 Ubuntu 24.04 / Jazzy:
 
+### 1. 拉取 submodule
+
+`src/bw_std_description` 是 submodule, 未拉取时构建会缺少该包, URDF 的 mesh 也无法解析.
+
+```bash
+# 首次克隆: 一并拉取 submodule.
+git clone --recurse-submodules https://github.com/BlueWorm-EAI-Tech/bw_std_teleop_ros2.git
+
+# 已克隆的仓库, 或克隆时漏掉了 submodule: 补拉 submodule.
+git submodule update --init --recursive
+
+# 校验: 行首为空格表示已就绪, 为 '-' 表示仍未拉取.
+git submodule status
+```
+
+
+### 2. 配置环境并构建
+
 ```bash
 # 执行 sudo、修改 Zsh 配置并构建, 执行前必须输入 `APPLY` 二次确认.
 ./scripts/local/ros_env_setup.sh --apply
@@ -49,6 +67,16 @@ colcon --log-base log/$ROS_DISTRO build \
   --symlink-install
 source install/$ROS_DISTRO/setup.zsh
 ```
+
+约束:
+
+- `ros_env_setup.sh --apply` 在构建前执行 `git submodule update --init --recursive`; 手动
+  `colcon build` 前必须自行确认 submodule 已拉取 (`git submodule status` 行首为空格), 否则
+  colcon 会缺少 `bw_std_description`, URDF 的 mesh 引用也无法解析.
+- `bw_std_description` 的 mesh 与显示模型来自 upstream submodule; 运行时契约 (`mimic`、
+  限位、ros2_control 接口) 由本仓库 `bw_std_bringup/urdf` 维护.
+- upstream `bw_std_description` 声明的 `gazebo_ros` 仅有 Humble 发行版; Jazzy 手动安装时
+  需 `--skip-keys casadi gazebo_ros`, `scripts/local/ros_env_setup.sh` 已按发行版处理.
 
 ## 启动与安全
 

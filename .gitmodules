@@ -1,0 +1,3 @@
+[submodule "src/bw_std_description"]
+	path = src/bw_std_description
+	url = https://github.com/BlueWorm-EAI-Tech/bw_std_description.git

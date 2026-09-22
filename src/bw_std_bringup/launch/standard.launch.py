@@ -37,12 +37,11 @@ def _motion_spawners(context):
 
 
 def generate_launch_description() -> LaunchDescription:
-    description_share = Path(get_package_share_directory("bw_std_description"))
     bringup_share = Path(get_package_share_directory("bw_std_bringup"))
     teleop_share = Path(get_package_share_directory("bw_teleop"))
     kinematics_share = Path(get_package_share_directory("bw_kinematics"))
 
-    model_path = description_share / "urdf" / "standard.xacro"
+    model_path = bringup_share / "urdf" / "standard.xacro"
     controllers_path = bringup_share / "config" / "standard_controllers.yaml"
 
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
