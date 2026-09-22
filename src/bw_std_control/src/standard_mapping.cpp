@@ -19,6 +19,8 @@ const std::array<std::string_view, kStandardJointCount> kStandardJointNames{
   "A_left_Degree8_joint", "A_right_Degree8_joint"};
 
 const std::array<std::string_view, kBaseInterfaceCount> kBaseInterfaceNames{"vx", "vy", "wz"};
+const std::array<std::string_view, kHeadInterfaceCount> kHeadInterfaceNames{
+  "pitch", "yaw", "roll"};
 
 namespace
 {
@@ -64,10 +66,11 @@ bool valid_directions(const std::array<double, kArmJointCount> & directions) noe
 
 bool valid_parameters(const MappingParameters & parameters) noexcept
 {
-  const std::array<double, 7> values{
+  const std::array<double, 8> values{
     parameters.gripper_travel_m,
     parameters.pelvis_max_velocity_mm_s,
     parameters.arm_max_velocity_rad_s, parameters.gripper_max_velocity_normalized_s,
+    parameters.head_max_velocity_rad_s,
     parameters.base_max_acceleration_x, parameters.base_max_acceleration_y,
     parameters.base_max_acceleration_omega};
   return all_float_representable(values) &&
@@ -81,6 +84,7 @@ bool valid_parameters(const MappingParameters & parameters) noexcept
          parameters.pelvis_max_velocity_mm_s > 0.0 &&
          parameters.arm_max_velocity_rad_s > 0.0 &&
          parameters.gripper_max_velocity_normalized_s > 0.0 &&
+         parameters.head_max_velocity_rad_s > 0.0 &&
          parameters.base_max_acceleration_x > 0.0 &&
          parameters.base_max_acceleration_y > 0.0 &&
          parameters.base_max_acceleration_omega > 0.0;
@@ -89,7 +93,8 @@ bool valid_parameters(const MappingParameters & parameters) noexcept
 bool finite_command(const StandardCommand & command) noexcept
 {
   return all_float_representable(command.position) &&
-         all_float_representable(command.base_velocity);
+         all_float_representable(command.base_velocity) &&
+         all_float_representable(command.head_position);
 }
 
 bool finite_state(const StandardState & state) noexcept
@@ -101,7 +106,8 @@ bool finite_head_hold(const HeadHold & head_hold) noexcept
 {
   return std::isfinite(head_hold.waist_position) &&
          std::isfinite(head_hold.head_yaw_position) &&
-         std::isfinite(head_hold.head_pitch_position);
+         std::isfinite(head_hold.head_pitch_position) &&
+         std::isfinite(head_hold.head_roll_position);
 }
 
 bool valid_motor_indices(
@@ -127,20 +133,24 @@ bool valid_directions(const std::array<double, kArmJointCount> & directions) noe
 }  // namespace
 
 bool try_extract_head_hold(
-  const V3FeedbackPayload & feedback, HeadHold & head_hold) noexcept
+  const FeedbackPayload & feedback, HeadHold & head_hold) noexcept
 {
   if (!std::isfinite(feedback.waist_position) || !std::isfinite(feedback.head_yaw_position) ||
     !std::isfinite(feedback.head_pitch_position))
   {
     return false;
   }
-  head_hold = {
-    feedback.waist_position, feedback.head_yaw_position, feedback.head_pitch_position};
+  // 头部坐标使用参考节点的固定 -1 变换; roll 无反馈字段, 保留上一条命令。
+  const float roll = head_hold.head_roll_position;
+  head_hold.waist_position = 0.0F;
+  head_hold.head_yaw_position = -feedback.head_yaw_position;
+  head_hold.head_pitch_position = -feedback.head_pitch_position;
+  head_hold.head_roll_position = roll;
   return true;
 }
 
 bool decode_complete_feedback(
-  const V3FeedbackPayload & feedback, const MappingParameters & parameters,
+  const FeedbackPayload & feedback, const MappingParameters & parameters,
   StandardState & state, HeadHold & head_hold) noexcept
 {
   StandardState decoded{};
@@ -156,7 +166,7 @@ bool decode_complete_feedback(
 }
 
 bool decode_standard_state(
-  const V3FeedbackPayload & feedback, const MappingParameters & parameters,
+  const FeedbackPayload & feedback, const MappingParameters & parameters,
   StandardState & state) noexcept
 {
   if (!valid_parameters(parameters)) {
@@ -209,7 +219,8 @@ bool decode_standard_state(
 
 bool encode_standard_command(
   const StandardCommand & command, const MappingParameters & parameters,
-  const HeadHold & head_hold, const bool power_enabled, V3CommandPayload & payload) noexcept
+  const HeadHold & head_hold, const bool power_enabled, CommandPayload & payload,
+  const std::array<double, kStandardJointCount> * const joint_velocities) noexcept
 {
   if (!finite_command(command) || !valid_parameters(parameters) ||
     !finite_head_hold(head_hold))
@@ -217,8 +228,8 @@ bool encode_standard_command(
     return false;
   }
 
-  V3CommandPayload encoded{};
-  encoded.control_flag = power_enabled ? 0x01U : 0x00U;
+  CommandPayload encoded{};
+  encoded.control_flag = power_enabled ? kActiveControlFlag : 0x00U;
   if (power_enabled) {
     if (!to_finite_float(command.base_velocity[0], encoded.vx) ||
       !to_finite_float(command.base_velocity[1], encoded.vy) ||
@@ -248,6 +259,14 @@ bool encode_standard_command(
   {
     return false;
   }
+  const auto arm_velocity_for = [&](const std::size_t joint_index) {
+      if (joint_velocities == nullptr || !std::isfinite((*joint_velocities)[joint_index])) {
+        return arm_max_velocity;
+      }
+      return static_cast<float>(std::clamp(
+        std::abs((*joint_velocities)[joint_index]), 0.0,
+        parameters.arm_max_velocity_rad_s));
+    };
 
   for (std::size_t joint = 0; joint < kArmJointCount; ++joint) {
     const std::size_t left = index(JointIndex::left_degree1) + joint;
@@ -265,8 +284,8 @@ bool encode_standard_command(
     {
       return false;
     }
-    encoded.left_joint_max_velocity[left_motor] = arm_max_velocity;
-    encoded.right_joint_max_velocity[right_motor] = arm_max_velocity;
+    encoded.left_joint_max_velocity[left_motor] = arm_velocity_for(left);
+    encoded.right_joint_max_velocity[right_motor] = arm_velocity_for(right);
   }
 
   const double left_gripper = std::clamp(
@@ -280,31 +299,48 @@ bool encode_standard_command(
   {
     return false;
   }
-  encoded.left_joint_max_velocity[7] = gripper_max_velocity;
-  encoded.right_joint_max_velocity[7] = gripper_max_velocity;
+  encoded.left_joint_max_velocity[7] = joint_velocities == nullptr ?
+    gripper_max_velocity : static_cast<float>(std::clamp(
+      std::abs((*joint_velocities)[index(JointIndex::left_gripper)]) /
+      parameters.gripper_travel_m, 0.0, parameters.gripper_max_velocity_normalized_s));
+  encoded.right_joint_max_velocity[7] = joint_velocities == nullptr ?
+    gripper_max_velocity : static_cast<float>(std::clamp(
+      std::abs((*joint_velocities)[index(JointIndex::right_gripper)]) /
+      parameters.gripper_travel_m, 0.0, parameters.gripper_max_velocity_normalized_s));
 
-  // 头部契约尚未稳定：只保持最近原始反馈位置，三个速度始终为零。
-  encoded.waist_position = head_hold.waist_position;
-  encoded.head_yaw_position = head_hold.head_yaw_position;
-  encoded.head_pitch_position = head_hold.head_pitch_position;
+  encoded.waist_position = 0.0F;
+  if (!to_finite_float(
+      -command.head_position[static_cast<std::size_t>(HeadIndex::yaw)],
+      encoded.head_yaw_position) ||
+    !to_finite_float(
+      -command.head_position[static_cast<std::size_t>(HeadIndex::pitch)],
+      encoded.head_pitch_position))
+  {
+    return false;
+  }
   encoded.waist_max_velocity = 0.0F;
-  encoded.head_yaw_max_velocity = 0.0F;
+  if (!to_finite_float(
+      -command.head_position[static_cast<std::size_t>(HeadIndex::roll)],
+      encoded.head_roll_position))
+  {
+    return false;
+  }
   encoded.head_pitch_max_velocity = 0.0F;
-  if (!v3_command_payload_is_finite(encoded)) {
+  if (!command_payload_is_finite(encoded)) {
     return false;
   }
   payload = encoded;
   return true;
 }
 
-bool v3_command_payload_is_finite(const V3CommandPayload & payload) noexcept
+bool command_payload_is_finite(const CommandPayload & payload) noexcept
 {
   const std::array<float, 14> scalar_values{
     payload.vx, payload.vy, payload.omega,
     payload.max_acc_x, payload.max_acc_y, payload.max_acc_omega,
     payload.pelvis_height, payload.pelvis_velocity,
     payload.waist_position, payload.head_yaw_position, payload.head_pitch_position,
-    payload.waist_max_velocity, payload.head_yaw_max_velocity,
+    payload.waist_max_velocity, payload.head_roll_position,
     payload.head_pitch_max_velocity};
   return all_finite(scalar_values) &&
          all_finite(payload.left_joint_position) &&

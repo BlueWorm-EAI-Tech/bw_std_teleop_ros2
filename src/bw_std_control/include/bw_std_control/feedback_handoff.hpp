@@ -7,14 +7,14 @@
 
 #include "realtime_tools/realtime_buffer.hpp"
 
-#include "bw_std_control/v3_protocol.hpp"
+#include "bw_std_control/protocol.hpp"
 
 namespace bw_std_control
 {
 
 struct StampedFeedback
 {
-  V3FeedbackPayload feedback{};
+  FeedbackPayload feedback{};
   std::chrono::steady_clock::time_point received_at{};
   std::uint64_t sequence{0U};
   bool valid{false};

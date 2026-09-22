@@ -1,4 +1,4 @@
-#include "bw_std_control/v3_frame_codec.hpp"
+#include "bw_std_control/frame_codec.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -43,39 +43,54 @@ std::uint16_t compute_modbus_crc16(
   return crc;
 }
 
-V3CommandFrame encode_command_frame(const V3CommandPayload & payload) noexcept
+CommandFrame encode_command_frame(const CommandPayload & payload) noexcept
 {
-  V3CommandFrame frame{};
-  frame[0] = kV3Header0;
-  frame[1] = kV3Header1;
-  frame[2] = kV3CommandType;
-  write_u16_le(static_cast<std::uint16_t>(kV3CommandPayloadSize), frame.data() + 3);
-  std::memcpy(frame.data() + kV3PrefixSize, &payload, sizeof(payload));
-  const auto crc = compute_modbus_crc16(frame.data() + 2, 3 + kV3CommandPayloadSize);
-  write_u16_le(crc, frame.data() + kV3PrefixSize + kV3CommandPayloadSize);
+  CommandFrame frame{};
+  frame[0] = kHeader0;
+  frame[1] = kHeader1;
+  frame[2] = kCommandType;
+  write_u16_le(static_cast<std::uint16_t>(kCommandPayloadSize), frame.data() + 3);
+  std::memcpy(frame.data() + kPrefixSize, &payload, sizeof(payload));
+  const auto crc = compute_modbus_crc16(frame.data() + 2, 3 + kCommandPayloadSize);
+  write_u16_le(crc, frame.data() + kPrefixSize + kCommandPayloadSize);
+  return frame;
+}
+
+ChassisCommandFrame encode_chassis_command_frame(
+  const ChassisCommandPayload & payload) noexcept
+{
+  ChassisCommandFrame frame{};
+  frame[0] = kHeader0;
+  frame[1] = kHeader1;
+  frame[2] = kChassisCommandType;
+  write_u16_le(static_cast<std::uint16_t>(kChassisCommandPayloadSize), frame.data() + 3);
+  std::memcpy(frame.data() + kPrefixSize, &payload, sizeof(payload));
+  const auto crc = compute_modbus_crc16(
+    frame.data() + 2, 3 + kChassisCommandPayloadSize);
+  write_u16_le(crc, frame.data() + kPrefixSize + kChassisCommandPayloadSize);
   return frame;
 }
 
 bool decode_feedback_frame(
   const std::uint8_t * const frame, const std::size_t size,
-  V3FeedbackPayload & feedback) noexcept
+  FeedbackPayload & feedback) noexcept
 {
-  if (frame == nullptr || size != kV3FeedbackFrameSize || frame[0] != kV3Header0 ||
-    frame[1] != kV3Header1 || frame[2] != kV3FeedbackType ||
-    read_u16_le(frame + 3) != kV3FeedbackPayloadSize)
+  if (frame == nullptr || size != kFeedbackFrameSize || frame[0] != kHeader0 ||
+    frame[1] != kHeader1 || frame[2] != kFeedbackType ||
+    read_u16_le(frame + 3) != kFeedbackPayloadSize)
   {
     return false;
   }
-  const auto received_crc = read_u16_le(frame + kV3PrefixSize + kV3FeedbackPayloadSize);
-  const auto expected_crc = compute_modbus_crc16(frame + 2, 3 + kV3FeedbackPayloadSize);
+  const auto received_crc = read_u16_le(frame + kPrefixSize + kFeedbackPayloadSize);
+  const auto expected_crc = compute_modbus_crc16(frame + 2, 3 + kFeedbackPayloadSize);
   if (received_crc != expected_crc) {
     return false;
   }
-  std::memcpy(&feedback, frame + kV3PrefixSize, sizeof(feedback));
+  std::memcpy(&feedback, frame + kPrefixSize, sizeof(feedback));
   return true;
 }
 
-void V3StreamParser::append(const std::uint8_t * const data, const std::size_t size) noexcept
+void StreamParser::append(const std::uint8_t * const data, const std::size_t size) noexcept
 {
   if (data == nullptr || size == 0U) {
     return;
@@ -94,19 +109,19 @@ void V3StreamParser::append(const std::uint8_t * const data, const std::size_t s
   size_ += size;
 }
 
-bool V3StreamParser::pop_feedback(V3FeedbackPayload & feedback) noexcept
+bool StreamParser::pop_feedback(FeedbackPayload & feedback) noexcept
 {
   while (size_ >= 2U) {
     std::size_t header_index = 0;
     while (header_index + 1U < size_ &&
-      (buffer_[header_index] != kV3Header0 || buffer_[header_index + 1U] != kV3Header1))
+      (buffer_[header_index] != kHeader0 || buffer_[header_index + 1U] != kHeader1))
     {
       ++header_index;
     }
     if (header_index + 1U >= size_) {
-      const bool preserve_header = buffer_[size_ - 1U] == kV3Header0;
+      const bool preserve_header = buffer_[size_ - 1U] == kHeader0;
       if (preserve_header) {
-        buffer_[0] = kV3Header0;
+        buffer_[0] = kHeader0;
       }
       size_ = preserve_header ? 1U : 0U;
       return false;
@@ -114,34 +129,34 @@ bool V3StreamParser::pop_feedback(V3FeedbackPayload & feedback) noexcept
     if (header_index > 0U) {
       discard_prefix(header_index);
     }
-    if (size_ < kV3PrefixSize) {
+    if (size_ < kPrefixSize) {
       return false;
     }
-    if (buffer_[2] != kV3FeedbackType ||
-      read_u16_le(buffer_.data() + 3) != kV3FeedbackPayloadSize)
+    if (buffer_[2] != kFeedbackType ||
+      read_u16_le(buffer_.data() + 3) != kFeedbackPayloadSize)
     {
       discard_prefix(1U);
       continue;
     }
-    if (size_ < kV3FeedbackFrameSize) {
+    if (size_ < kFeedbackFrameSize) {
       return false;
     }
-    if (!decode_feedback_frame(buffer_.data(), kV3FeedbackFrameSize, feedback)) {
+    if (!decode_feedback_frame(buffer_.data(), kFeedbackFrameSize, feedback)) {
       discard_prefix(1U);
       continue;
     }
-    discard_prefix(kV3FeedbackFrameSize);
+    discard_prefix(kFeedbackFrameSize);
     return true;
   }
   return false;
 }
 
-void V3StreamParser::clear() noexcept
+void StreamParser::clear() noexcept
 {
   size_ = 0U;
 }
 
-void V3StreamParser::discard_prefix(const std::size_t count) noexcept
+void StreamParser::discard_prefix(const std::size_t count) noexcept
 {
   if (count >= size_) {
     size_ = 0U;

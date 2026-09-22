@@ -1,0 +1,6 @@
+#ifndef BW_KINEMATICS__ALGORITHM__STANDARD_FK_SOLVER_HPP_
+#define BW_KINEMATICS__ALGORITHM__STANDARD_FK_SOLVER_HPP_
+
+#include "bw_kinematics/algorithm/standard_kinematics_types.hpp"
+
+#endif  // BW_KINEMATICS__ALGORITHM__STANDARD_FK_SOLVER_HPP_

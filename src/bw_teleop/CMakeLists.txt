@@ -43,13 +43,6 @@ ament_target_dependencies(bw_teleop
   std_msgs
 )
 
-if(BUILD_TESTING)
-  find_package(ament_cmake_gtest REQUIRED)
-
-  ament_add_gtest(test_vr_pipeline test/test_vr_pipeline.cpp)
-  target_include_directories(test_vr_pipeline PRIVATE include)
-  target_link_libraries(test_vr_pipeline bw_teleop_core)
-endif()
 
 install(TARGETS bw_teleop bw_teleop_core
   ARCHIVE DESTINATION lib

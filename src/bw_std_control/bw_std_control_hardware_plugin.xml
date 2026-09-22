@@ -4,6 +4,6 @@
     name="bw_std_control/StandardSystemHardware"
     type="bw_std_control::StandardSystemHardware"
     base_class_type="hardware_interface::SystemInterface">
-    <description>Standard robot V3 asynchronous ros2_control system hardware.</description>
+    <description>Standard robot asynchronous ros2_control system hardware.</description>
   </class>
 </library>

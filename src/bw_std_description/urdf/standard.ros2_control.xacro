@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <!-- 受控关节使用统一接口，真机和 mock 因此具有相同的控制器契约。 -->
+  <!-- 受控关节使用统一接口-->
   <xacro:macro name="standard_position_joint" params="joint_name lower upper initial_value:=0.0">
     <joint name="${joint_name}">
       <command_interface name="position">
@@ -16,7 +16,7 @@
   </xacro:macro>
 
   <xacro:macro name="standard_ros2_control"
-               params="name use_mock_hardware serial_port baud_rate feedback_timeout_ms power_on_on_activate arm_mapping_calibrated left_arm_motor_indices right_arm_motor_indices left_arm_direction right_arm_direction left_arm_raw_zero_rad right_arm_raw_zero_rad arm_max_velocity_rad_s pelvis_max_velocity_mm_s gripper_max_velocity_normalized_s">
+               params="name use_mock_hardware serial_port baud_rate feedback_timeout_ms power_on_on_activate arm_mapping_calibrated left_arm_motor_indices right_arm_motor_indices left_arm_direction right_arm_direction left_arm_raw_zero_rad right_arm_raw_zero_rad arm_max_velocity_rad_s pelvis_max_velocity_mm_s gripper_max_velocity_normalized_s arm_startup_limit_tolerance_rad gripper_startup_limit_tolerance_m head_max_velocity_rad_s command_rate_hz">
     <ros2_control name="${name}" type="system">
       <hardware>
         <xacro:if value="${use_mock_hardware}">
@@ -39,6 +39,10 @@
           <param name="arm_max_velocity_rad_s">${arm_max_velocity_rad_s}</param>
           <param name="pelvis_max_velocity_mm_s">${pelvis_max_velocity_mm_s}</param>
           <param name="gripper_max_velocity_normalized_s">${gripper_max_velocity_normalized_s}</param>
+          <param name="arm_startup_limit_tolerance_rad">${arm_startup_limit_tolerance_rad}</param>
+          <param name="gripper_startup_limit_tolerance_m">${gripper_startup_limit_tolerance_m}</param>
+          <param name="head_max_velocity_rad_s">${head_max_velocity_rad_s}</param>
+          <param name="command_rate_hz">${command_rate_hz}</param>
         </xacro:unless>
       </hardware>
 
@@ -64,15 +68,39 @@
       <xacro:standard_position_joint joint_name="A_right_Degree8_joint" lower="0.0" upper="0.04965"/>
       <xacro:standard_position_joint
         joint_name="C_joint"
-        lower="-0.231"
-        upper="0.231"
-        initial_value="0.0"/>
+        lower="-0.5"
+        upper="0.0"
+        initial_value="-0.1"/>
 
-      <!-- 真机与 mock 共用机体速度 GPIO，不导出虚构的轮关节反馈。 -->
+      <!-- 真机与 mock 共用机体速度 GPIO -->
       <gpio name="base">
         <command_interface name="vx"/>
         <command_interface name="vy"/>
         <command_interface name="wz"/>
+      </gpio>
+
+      <!-- 头部导出 command-only GPIO -->
+      <gpio name="head">
+        <command_interface name="pitch">
+          <param name="min">-0.524</param>
+          <param name="max">0.785</param>
+        </command_interface>
+        <command_interface name="yaw">
+          <param name="min">-1.570</param>
+          <param name="max">1.570</param>
+        </command_interface>
+        <command_interface name="roll">
+          <param name="min">-0.349</param>
+          <param name="max">0.349</param>
+        </command_interface>
+      </gpio>
+
+      <!-- 安全 GPIO: 遥操作控制活跃请求 1; VR 断流后请求 0 触发软件掉电。 -->
+      <gpio name="safety">
+        <command_interface name="power">
+          <param name="min">0</param>
+          <param name="max">1</param>
+        </command_interface>
       </gpio>
     </ros2_control>
   </xacro:macro>

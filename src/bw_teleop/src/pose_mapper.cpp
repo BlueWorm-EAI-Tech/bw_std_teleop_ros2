@@ -94,6 +94,9 @@ PoseMapper::PoseMapper(PoseMapperConfig config)
 
 void PoseMapper::set_control_mode(ControlMode mode) noexcept
 {
+  if (mode != ControlMode::relative && mode != ControlMode::absolute) {
+    return;
+  }
   if (mode == control_mode_) {
     return;
   }
@@ -111,6 +114,9 @@ bool PoseMapper::update(
   Side side, const Pose & hand_pose, const bool clutch_pressed,
   const Pose & measured_target, const bool measured_target_valid) noexcept
 {
+  if (side != Side::left && side != Side::right) {
+    return false;
+  }
   HandState & hand = hands_[index(side)];
   if (!clutch_pressed || !is_valid_pose(hand_pose)) {
     hand.clutch_active = false;
@@ -165,19 +171,43 @@ bool PoseMapper::update(
 
 void PoseMapper::release_clutch(Side side) noexcept
 {
+  if (side != Side::left && side != Side::right) {
+    return;
+  }
   hands_[index(side)].clutch_active = false;
 }
 
 void PoseMapper::reset(Side side) noexcept
 {
+  if (side != Side::left && side != Side::right) {
+    return;
+  }
   HandState & hand = hands_[index(side)];
   hand.target = clamp_to_workspace(config_.reset_poses[index(side)]);
   hand.target_baseline = hand.target;
   hand.clutch_active = false;
 }
 
+void PoseMapper::set_target(Side side, const Pose & pose) noexcept
+{
+  if (side != Side::left && side != Side::right) {
+    return;
+  }
+  if (!is_valid_pose(pose)) {
+    return;
+  }
+  HandState & hand = hands_[index(side)];
+  hand.target = clamp_to_workspace(pose);
+  hand.target.orientation = normalize(hand.target.orientation);
+  hand.target_baseline = hand.target;
+  hand.clutch_active = false;
+}
+
 Pose PoseMapper::target(Side side) const noexcept
 {
+  if (side != Side::left && side != Side::right) {
+    return Pose{};
+  }
   return hands_[index(side)].target;
 }
 

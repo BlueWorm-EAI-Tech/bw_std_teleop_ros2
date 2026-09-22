@@ -7,3 +7,11 @@
     <description>Standard robot body velocity controller with an independent watchdog.</description>
   </class>
 </library>
+<library path="standard_head_controller">
+  <class
+    name="bw_std_control/StandardHeadController"
+    type="bw_std_control::StandardHeadController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>Standard pitch/yaw/roll position controller with timeout hold.</description>
+  </class>
+</library>

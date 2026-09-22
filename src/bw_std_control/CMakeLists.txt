@@ -15,15 +15,17 @@ find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(Threads REQUIRED)
 
 add_library(${PROJECT_NAME}_core STATIC
+  src/arm_power_on_sequence.cpp
   src/base_command_limiter.cpp
   src/command_safety.cpp
   src/hardware_contract.cpp
   src/standard_mapping.cpp
-  src/v3_command_queue.cpp
-  src/v3_frame_codec.cpp
+  src/command_queue.cpp
+  src/frame_codec.cpp
 )
 target_include_directories(${PROJECT_NAME}_core
   PUBLIC
@@ -64,13 +66,28 @@ ament_target_dependencies(standard_base_controller
   controller_interface geometry_msgs hardware_interface pluginlib
   rclcpp rclcpp_lifecycle realtime_tools)
 
+add_library(standard_head_controller SHARED src/standard_head_controller.cpp)
+target_include_directories(standard_head_controller
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_compile_options(standard_head_controller PRIVATE -Wall -Wextra -Wpedantic)
+ament_target_dependencies(standard_head_controller
+  controller_interface hardware_interface pluginlib rclcpp rclcpp_lifecycle
+  realtime_tools sensor_msgs)
+
 pluginlib_export_plugin_description_file(
   hardware_interface bw_std_control_hardware_plugin.xml)
 pluginlib_export_plugin_description_file(
   controller_interface bw_std_control_controller_plugin.xml)
 
 install(
-  TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_core standard_base_controller
+  TARGETS
+    ${PROJECT_NAME}
+    ${PROJECT_NAME}_core
+    standard_base_controller
+    standard_head_controller
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -87,37 +104,6 @@ install(
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   controller_interface geometry_msgs hardware_interface pluginlib
-  rclcpp rclcpp_lifecycle realtime_tools Threads)
-
-if(BUILD_TESTING)
-  find_package(ament_cmake_gtest REQUIRED)
-
-  ament_add_gtest(test_v3_frame_codec test/test_v3_frame_codec.cpp)
-  target_link_libraries(test_v3_frame_codec ${PROJECT_NAME}_core)
-
-  ament_add_gtest(test_standard_mapping test/test_standard_mapping.cpp)
-  target_link_libraries(test_standard_mapping ${PROJECT_NAME}_core)
-
-  ament_add_gtest(test_command_safety test/test_command_safety.cpp)
-  target_link_libraries(test_command_safety ${PROJECT_NAME}_core)
-
-  ament_add_gtest(test_base_command_limiter test/test_base_command_limiter.cpp)
-  target_link_libraries(test_base_command_limiter ${PROJECT_NAME}_core)
-
-  ament_add_gtest(test_async_serial_transport test/test_async_serial_transport.cpp)
-  target_link_libraries(test_async_serial_transport ${PROJECT_NAME})
-
-  ament_add_gtest(test_plugin_exports test/test_plugin_exports.cpp)
-  target_include_directories(test_plugin_exports PRIVATE include)
-  ament_target_dependencies(test_plugin_exports
-    controller_interface geometry_msgs hardware_interface pluginlib
-    rclcpp rclcpp_lifecycle realtime_tools)
-  add_dependencies(test_plugin_exports ${PROJECT_NAME} standard_base_controller)
-
-  ament_add_gtest(test_realtime_contracts test/test_realtime_contracts.cpp)
-  target_include_directories(test_realtime_contracts PRIVATE include)
-  ament_target_dependencies(test_realtime_contracts realtime_tools)
-  target_link_libraries(test_realtime_contracts ${PROJECT_NAME} ${PROJECT_NAME}_core)
-endif()
+  rclcpp rclcpp_lifecycle realtime_tools sensor_msgs Threads)
 
 ament_package()

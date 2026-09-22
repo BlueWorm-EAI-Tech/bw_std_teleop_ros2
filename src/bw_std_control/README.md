@@ -1,90 +1,145 @@
 # bw_std_control
 
-## 职责
+Standard `ros2_control` 控制包:
 
-`bw_std_control` 是 Standard 机器人的 V3 `ros2_control` 控制包，包含异步串口、
-固定帧编解码、执行器映射、系统硬件插件和机体速度控制器。它不包含机器人模型、
-控制器 YAML、Launch、VR 输入或运动学；部署配置由 `bw_std_bringup` 管理。
+- `StandardSystemHardware`: 异步串口系统硬件插件.
+- `StandardBaseController`: 底盘 `TwistStamped` 控制器.
+- `StandardHeadController`: 头部 command-only GPIO 控制器.
+- frame codec, 反馈 handoff, 固定容量命令队列与命令安全检查.
 
-核心映射和安全算法不依赖 ROS。串口系统调用只在 ASIO 线程执行；反馈通过
-`RealtimeBuffer` 双缓冲交接，普通命令通过固定容量 SPSC 队列交接。软件掉电使用
-独立优先队列和 emergency latch：锁存后拒绝新普通命令并抑制既有普通积压，直到
-串口消费者确认掉电帧发送完成；session 关闭时也会安全复位 mailbox。
-`controller_manager` 更新线程不会等待串口或反馈解析互斥锁。
+模型与接口契约由 `bw_std_description` 提供, 部署组合由 `bw_std_bringup` 提供.
 
-关节坐标以 `bw_std_description/urdf/standard.urdf` 的零位、origin 和 axis 为
-唯一真源。V3 安装零偏只在映射层换算，不通过修改 URDF 或补偿 TF 处理。
-Standard 的电机映射必须独立标定：每侧手臂的 V3 通道索引、方向和零位均须
-显式配置并严格校验，编码与解码使用同一映射保持可逆。
+## 资源契约
 
-## 插件与接口
+硬件必须严格提供:
 
-- `bw_std_control/StandardSystemHardware`：V3 系统硬件插件。
-- `bw_std_control/StandardBaseController`：订阅 `~/reference`
-  (`geometry_msgs/msg/TwistStamped`) 的底盘控制器。
+- 17 个主动关节, 每关节只提供 `position` command interface 与 `position`, `velocity`,
+  `effort` state interface:
 
-硬件插件严格按名称查找 17 个主动关节：`C_joint`、左右
-`A_*_Degree1_joint` 至 `A_*_Degree7_joint`，以及左右
-`A_*_Degree8_joint`。每个关节必须提供 `position` 命令接口及
-`position/velocity/effort` 状态接口。`Degree9` 是 URDF mimic 关节，不能导出
-硬件接口。底盘仅提供 `base/vx`、`base/vy`、`base/wz` 命令接口。
+```text
+C_joint
+A_left_Degree1_joint ... A_left_Degree7_joint
+A_right_Degree1_joint ... A_right_Degree7_joint
+A_left_Degree8_joint
+A_right_Degree8_joint
+```
 
-头部和 waist 不导出状态或命令接口。发给 V3 的对应位置字段保持最近一次有限的
-原始反馈值，三个最大速度字段始终为零，因此本包不会产生头部运动。
+- command-only GPIO, 无 state interface:
+
+```text
+base/vx, base/vy, base/wz
+head/pitch, head/yaw, head/roll
+```
+
+- `Degree9` 是 URDF mimic, 不导出独立硬件接口.
+- 头部命令顺序固定 pitch, yaw, roll, 限位:
+
+```text
+pitch [-0.524, 0.785] rad   # ROS 侧; 固件侧 [-0.785, 0.524] 经固定 -1 变换的镜像
+yaw   [-1.570, 1.570] rad
+roll  [-0.349, 0.349] rad
+```
+
+`StandardHeadController` 订阅 `/Teleop/head_pose`, 只接受三个正式头部关节名与完整有限的
+位置; 不申请头部 state interface, 命令过期, 非法或 controller 停用时保持最近安全位置.
+
+## 协议
+
+- 帧头 `0x55 0xAA`; command type `0x01`, feedback type `0x02`; CRC 2 字节.
+- command payload `249 B` (frame `256 B`); feedback payload `248 B` (frame `255 B`).
+- 下盘 (底盘/滑台) 独立控制器 `0x21` 帧: payload `37 B` (frame `44 B`); 激活后先连发
+  `200` 个唤醒帧 (带软件开关位, 速度全零, 滑台最大速度 `0`), 之后回到整机 `0x01` 帧.
+- `CommandPayload` offset `177` 固定为 `head_roll_position`, 不得恢复旧头部速度字段语义;
+  waist 编码固定 `0`; 软件掉电帧保持有限安全位置字段.
+
+## 映射和单位
+
+每侧手臂必须配置:
+
+- `*_arm_motor_indices`: `0..6` 的完整一一置换.
+- `*_arm_direction`: 每项只能为 `-1` 或 `1`.
+- `*_arm_raw_zero_rad`: 恰好 7 个有限原始零位.
+
+```text
+q = direction * (raw_position - raw_zero)
+raw_position = direction * q + raw_zero
+```
+
+- pelvis height 用毫米, velocity 用毫米每秒, ROS `C_joint` 用米.
+- 夹爪 ROS `0..0.04965 m` 对应协议 `0..1`.
+- 头部 ROS `[pitch, yaw, roll]` 按协议固定符号转换; feedback 无 roll state field, roll
+  hold 取最近一次有限命令.
+
+未标定默认值 (identity index, 全 `+1` direction, 全零 raw-zero) 只用于掉电诊断与接口
+联调; 没有现场逐轴数据时不得启用真实运动.
 
 ## 硬件参数
 
-- `serial_port`：串口设备，默认 `/dev/ttyACM0`。
-- `baud_rate`：波特率，默认 `2000000`。
-- `feedback_timeout_ms`：反馈 watchdog，默认 `100` ms。
-- `power_on_on_activate`：激活时软件上电，默认 `false`，只接受 `true/false`。
-- `arm_mapping_calibrated`：Standard 双臂映射是否已完成逐轴标定，默认 `false`。
-  只有它和 `power_on_on_activate` 同时为 `true` 才允许发送上电帧。
-- `command_rate_hz`：V3 最大发送频率，默认 `40` Hz。
-- 升降不提供运行时零偏或参考点参数。V3 位置毫米值直接对应源 URDF 的
-  `C_joint` 米制值（`0 mm <-> 0 m`），编码使用严格逆式。
-- `left_arm_motor_indices`、`right_arm_motor_indices`：按 URDF Degree1 到 Degree7
-  排列的 V3 Motor 索引，必须是 `0..6` 的完整一一置换。
-- `left_arm_direction`、`right_arm_direction`：按 Degree1 到 Degree7 排列的方向，
-  每项只能为 `-1` 或 `1`。
-- `left_arm_raw_zero_rad`、`right_arm_raw_zero_rad`：按 Degree1 到 Degree7 排列，
-  保存对应 Motor 在源 URDF `q=0` 时的原始值。数组必须恰好 7 项且全部有限。
+- `serial_port` 默认 `/dev/ttyACM0`; `baud_rate` 默认 `2000000`;
+  `feedback_timeout_ms` 默认 `100`.
+- `command_rate_hz` 默认 `40`, Standard bringup 传 `200` 
+- `power_on_on_activate` 默认 `false`; `arm_mapping_calibrated` 默认 `false`.
+- `left/right_arm_motor_indices`, `left/right_arm_direction`,
+  `left/right_arm_raw_zero_rad`.
+- `pelvis_max_velocity_mm_s` 默认 `200`.
+- `arm_max_velocity_rad_s` 默认 `1.0`, Standard bringup 传 `12.0` (对齐 standard_0907
+  `ruckig.max_velocity`), 作为每周期步长上限与每关节 `max velocity` 字段上限.
+- `gripper_max_velocity_normalized_s` 默认 `1.0`.
+- `arm_startup_limit_tolerance_rad` 默认 `0`, 上限 `0.002`;
+  `gripper_startup_limit_tolerance_m` 默认 `0`, 上限 `0.001`.
+- `head_max_velocity_rad_s` 默认 `1.0`.
+- `base_max_acceleration_x`, `base_max_acceleration_y`, `base_max_acceleration_omega`:
+  默认值由映射参数结构提供.
 
-未标定默认使用 identity 索引、全 `+1` 方向和全零偏，仅用于掉电诊断，**不代表
-Standard 实机映射**。单帧绝对位置不能确定通道、方向和零位；必须逐轴采集增量。
-- `pelvis_max_velocity_mm_s`、`arm_max_velocity_rad_s`、
-  `gripper_max_velocity_normalized_s`：执行器速度上限。
-- `base_max_acceleration_x/y/omega`：V3 底盘加速度上限。
+只有 `power_on_on_activate=true` 且 `arm_mapping_calibrated=true` 时, 正常 command frame
+才允许使用软件上电 control flag; 否则激活帧与运行路径保持 `control_flag=0`.
 
-夹爪行程固定为 `0.04965 m`，V3 值 `0` 对应 URDF 零位（闭合），`1` 对应
-`0.04965 m`（张开）。
-底盘控制器参数为 `command_timeout_sec`、`max_vx`、`max_vy`、`max_wz`。
+控制字与 standard_0907 一致: `bit0` 软件上电, `bit2` 底盘, `bit3` 左臂, `bit4` 右臂,
+`bit5` 头部. 控制活跃发 `0x3D`; `safety/power` 为 `0` (默认, `/teleop/control_active`
+为 false 或超时 `0.5 s`) 时持续发送 `control_flag=0` 的安全保持帧, 即软件掉电.
 
-## 安全行为
+## 软件上电时序
 
-激活前必须收到一帧新鲜、完整且有限的反馈，包含三个有限的头部原始位置字段。
-首帧反馈用于同步所有状态和命令，
-形成 measured-hold；默认不会软件上电。命令经过名称契约、有限值、URDF 限位和
-单周期增量限制。串口故障、反馈超时或非法命令会停用写入并优先发送软件掉电帧，
-掉电之后不会继续发送积压的上电命令。
-底盘控制器还有独立 watchdog，超时、停用和非法输入均写零速度。故障后不会自动
-重新上电，需由上层显式恢复生命周期。
-零偏不会从启动首帧自动生成，避免机器人在任意姿态重启时静默重定义源 URDF 坐标。
-未标定时即使请求 `power_on_on_activate=true`，插件也会拒绝软件上电并保持
-`control_flag=0` 的只读反馈模式。
+不允许直接跳到 `0x3D`:
 
-## 构建与测试
+1. 未上电状态先取权威 measured-hold: 连续 `5` 帧臂位置字段有限即认为可用, 等待上限
+   `3000 ms` (位置字段可信, 即使右臂状态掩码为 `0x00`); 超时拒绝激活.
+2. 发关闭双臂位的 `0x25` 控制字 (软件上电 + 底盘 + 头部) 并保持至少 `10 ms`, 且该帧写入
+   串口完成后才发 `0x3D` 整字使能帧.
+3. 使能过渡帧使用步骤 1 的实测保持位置, 上电后不重读: 上电短窗口内右臂会短暂上报零值
+   位置 (臂实际姿态不变), 重读会把旧零值当成保持位置下发.
+
+预充电期间任一臂反馈转为非有限值, 出现掉电请求或写入未完成都会作废本次时序; 重新上电
+必须重新满足上述条件. 每关节 `max velocity` 字段由本帧指令增量推算, 上限为
+`arm_max_velocity_rad_s`.
+
+## 生命周期和安全行为
+
+- 激活前必须收到新鲜, 完整且有限的 feedback, 包含 17 个主动关节状态字段以及 waist,
+  head yaw, head pitch 的有限字段; 首帧反馈初始化状态与 command measured-hold: 17 个
+  关节命令同步到实测位置, base 三轴同步为 `0`, 头部同步到 feedback hold, waist 保持 `0`.
+- 激活时 measured-hold 必须通过完整关节与头部限位检查; 默认容差 `0`, 显式配置容差后只
+  允许容差内边界偏差且只允许朝硬限位内恢复, 超容差拒绝激活并打印具体关节与数值.
+- 更新线程不等待串口或反馈解析锁; 串口线程解析 frame 后通过 feedback handoff 交给
+  ros2_control; 普通命令使用固定容量队列, 软件掉电使用独立优先路径和 latch.
+- 以下情况停止 active command 路径并请求优先软件掉电: 串口 transport 故障或关闭;
+  feedback 超时; feedback 非有限, 缺失或越过配置限位; ros2_control interface 访问失败;
+  command 非有限或单周期增量超限; command 编码或队列失败.
+- 指令位置越过模型限位不再直接掉电: 非有限值仍故障, 有限值记录 `command clamped` 并
+  截断到限位内; 反馈状态字变化会打印 `feedback status changed`.
+- 故障后不自动重新上电, 必须重新走生命周期恢复; 未标定时即使请求
+  `power_on_on_activate=true`, 也只允许掉电反馈模式.
+
+控制器:
+
+- `StandardBaseController` 订阅 `~/reference`, 默认 `0.1 s` command timeout, 限速或非法
+  输入时输出零速度; 订阅 `control_active_topic` (默认 `/teleop/control_active`, 超时
+  `control_active_timeout_sec` 默认 `0.5 s`) 并写入 `safety/power` 命令 GPIO.
+- `StandardHeadController` 订阅 `/Teleop/head_pose`, 具有独立 timeout, 完整关节名检查,
+  限位检查和安全保持.
+
+## 构建
 
 ```bash
-source /opt/ros/$ROS_DISTRO/setup.zsh
 colcon build --packages-select bw_std_control --symlink-install
-colcon test --packages-select bw_std_control
-colcon test-result --verbose
 ```
-
-自动化测试覆盖 V3 CRC/乱流重同步、双臂通道置换/方向/全轴零偏、
-位置/速度/力矩及逆映射、
-夹爪和升降换算、float 可表示性、首帧头部完整性、精确关节名、SPSC 满队列、
-双缓冲交接、限位与单周期增量、底盘 watchdog、串口关闭行为和 pluginlib 加载。
-当前只有旧链路的右臂经过有限真机验证；本包尚未完成 Standard 双臂、整机或
-大规模 HIL 验证。

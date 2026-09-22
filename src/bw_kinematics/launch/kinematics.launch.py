@@ -12,15 +12,17 @@ def generate_launch_description() -> LaunchDescription:
     package_share = Path(get_package_share_directory("bw_kinematics"))
     default_parameters = str(package_share / "config" / "kinematics.yaml")
 
-    robot_description = LaunchConfiguration("robot_description")
+    ik_model_path = LaunchConfiguration("ik_model_path")
     parameters_file = LaunchConfiguration("parameters_file")
 
     return LaunchDescription(
         [
             DeclareLaunchArgument(
-                "robot_description",
-                default_value="",
-                description="展开后的 Standard URDF XML，必须由 bringup 传入",
+                "ik_model_path",
+                default_value=str(
+                    package_share / "assets" / "standard_ik" / "standard_ik.urdf"
+                ),
+                description="Standard 14 轴 Pinocchio/CasADi IK URDF",
             ),
             DeclareLaunchArgument(
                 "parameters_file",
@@ -40,7 +42,7 @@ def generate_launch_description() -> LaunchDescription:
                         name="kinematics_node",
                         parameters=[
                             parameters_file,
-                            {"robot_description": robot_description},
+                            {"ik_model_path": ik_model_path},
                         ],
                     )
                 ],

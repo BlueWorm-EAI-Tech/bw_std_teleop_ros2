@@ -8,6 +8,7 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 
 #include "bw_teleop/manager/vr_stream_manager.hpp"
@@ -46,6 +47,11 @@ private:
     std::string gripper_command_output;
     std::string lift_command_output;
     std::string base_command_output;
+    std::string head_pose_output;
+    // 遥操作控制活跃标志: 供底盘控制器映射到 safety/power, VR 断流后自动掉电。
+    std::string control_active_output;
+    // 关节空间复位触发(发给运动学节点)。
+    std::string reset_request_output;
   };
 
   struct JointNames
@@ -89,6 +95,9 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr gripper_command_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr lift_command_pub_;
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr base_command_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr head_pose_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr control_active_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr reset_request_pub_;
 
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_measured_pose_sub_;

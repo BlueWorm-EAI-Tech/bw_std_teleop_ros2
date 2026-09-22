@@ -34,6 +34,8 @@ controller_interface::CallbackReturn StandardBaseController::on_init()
     auto_declare<double>("max_vx", 0.5);
     auto_declare<double>("max_vy", 0.5);
     auto_declare<double>("max_wz", 0.8);
+    auto_declare<std::string>("control_active_topic", "/teleop/control_active");
+    auto_declare<double>("control_active_timeout_sec", 0.5);
   } catch (const std::exception & error) {
     RCLCPP_ERROR(get_node()->get_logger(), "声明底盘参数失败: %s", error.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -46,7 +48,7 @@ StandardBaseController::command_interface_configuration() const
 {
   return {
     controller_interface::interface_configuration_type::INDIVIDUAL,
-    {"base/vx", "base/vy", "base/wz"}};
+    {"base/vx", "base/vy", "base/wz", "safety/power"}};
 }
 
 controller_interface::InterfaceConfiguration
@@ -79,6 +81,19 @@ controller_interface::CallbackReturn StandardBaseController::on_configure(
   command_subscription_ = get_node()->create_subscription<geometry_msgs::msg::TwistStamped>(
     "~/reference", rclcpp::SystemDefaultsQoS(),
     std::bind(&StandardBaseController::command_callback, this, std::placeholders::_1));
+  const double control_active_timeout_sec =
+    get_node()->get_parameter("control_active_timeout_sec").as_double();
+  if (!std::isfinite(control_active_timeout_sec) || control_active_timeout_sec <= 0.0) {
+    RCLCPP_ERROR(get_node()->get_logger(), "遥操作控制超时必须为有限正数");
+    return controller_interface::CallbackReturn::ERROR;
+  }
+  control_active_timeout_ = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+    std::chrono::duration<double>{control_active_timeout_sec});
+  control_active_subscription_ = get_node()->create_subscription<std_msgs::msg::Bool>(
+    get_node()->get_parameter("control_active_topic").as_string(), rclcpp::SystemDefaultsQoS(),
+    std::bind(&StandardBaseController::control_active_callback, this, std::placeholders::_1));
+  control_active_request_ = false;
+  control_active_stamp_ = std::chrono::steady_clock::time_point{};
   command_buffer_.writeFromNonRT(RealtimeBaseCommand{});
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -87,8 +102,10 @@ controller_interface::CallbackReturn StandardBaseController::on_activate(
   const rclcpp_lifecycle::State &)
 {
   command_buffer_.writeFromNonRT(RealtimeBaseCommand{});
-  if (command_interfaces_.size() != 3U || !write_zero_command()) {
-    RCLCPP_ERROR(get_node()->get_logger(), "激活时无法清零三个底盘 command interface");
+  if (command_interfaces_.size() != 4U || !write_zero_command() || !write_safety_power(false)) {
+    RCLCPP_ERROR(
+      get_node()->get_logger(),
+      "激活时无法清零底盘 command interface 或初始化 safety/power");
     return controller_interface::CallbackReturn::ERROR;
   }
   return controller_interface::CallbackReturn::SUCCESS;
@@ -98,8 +115,9 @@ controller_interface::CallbackReturn StandardBaseController::on_deactivate(
   const rclcpp_lifecycle::State &)
 {
   const bool zeroed = write_zero_command();
+  const bool power_cleared = write_safety_power(false);
   command_buffer_.writeFromNonRT(RealtimeBaseCommand{});
-  return zeroed ? controller_interface::CallbackReturn::SUCCESS :
+  return (zeroed && power_cleared) ? controller_interface::CallbackReturn::SUCCESS :
          controller_interface::CallbackReturn::ERROR;
 }
 
@@ -117,22 +135,40 @@ controller_interface::return_type StandardBaseController::update(
 {
   const RealtimeBaseCommand command{*command_buffer_.readFromRT()};
   const auto now = std::chrono::steady_clock::now();
+  const bool control_active = control_active_request_ &&
+    now - control_active_stamp_ <= control_active_timeout_;
+  const bool power_written = write_safety_power(control_active);
   if (!command.valid || now < command.received_at ||
     now - command.received_at > command_timeout_)
   {
-    return write_zero_command() ? controller_interface::return_type::OK :
+    const bool zeroed = write_zero_command();
+    return (zeroed && power_written) ? controller_interface::return_type::OK :
            controller_interface::return_type::ERROR;
   }
-  if (!write_command(command.velocity)) {
+  if (!write_command(command.velocity) || !power_written) {
     static_cast<void>(write_zero_command());
     return controller_interface::return_type::ERROR;
   }
   return controller_interface::return_type::OK;
 }
 
+void StandardBaseController::control_active_callback(std_msgs::msg::Bool::SharedPtr message)
+{
+  if (message == nullptr) {
+    control_active_request_ = false;
+    return;
+  }
+  control_active_request_ = message->data;
+  control_active_stamp_ = std::chrono::steady_clock::now();
+}
+
 void StandardBaseController::command_callback(
   geometry_msgs::msg::TwistStamped::SharedPtr message)
 {
+  if (message == nullptr) {
+    command_buffer_.writeFromNonRT(RealtimeBaseCommand{});
+    return;
+  }
   const auto now = std::chrono::steady_clock::now();
   const std::array<double, 3> requested{
     message->twist.linear.x, message->twist.linear.y, message->twist.angular.z};
@@ -154,7 +190,7 @@ void StandardBaseController::command_callback(
 
 bool StandardBaseController::write_command(const std::array<double, 3> & velocity)
 {
-  if (command_interfaces_.size() != velocity.size()) {
+  if (command_interfaces_.size() < velocity.size()) {
     return false;
   }
   bool written = true;
@@ -167,6 +203,17 @@ bool StandardBaseController::write_command(const std::array<double, 3> & velocit
 bool StandardBaseController::write_zero_command()
 {
   return write_command({0.0, 0.0, 0.0});
+}
+
+bool StandardBaseController::write_safety_power(const bool active)
+{
+  for (std::size_t index = 0; index < command_interfaces_.size(); ++index) {
+    if (command_interfaces_[index].get_name() != "safety/power") {
+      continue;
+    }
+    return set_command_value(command_interfaces_[index], active ? 1.0 : 0.0);
+  }
+  return false;
 }
 
 }  // namespace bw_std_control

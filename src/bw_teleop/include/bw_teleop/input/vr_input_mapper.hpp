@@ -26,6 +26,7 @@ struct JoyInput
 
 struct MappedVrFrame
 {
+  double sender_timestamp{0.0};
   algorithm::Pose head_pose;
   algorithm::Pose left_pose;
   algorithm::Pose right_pose;

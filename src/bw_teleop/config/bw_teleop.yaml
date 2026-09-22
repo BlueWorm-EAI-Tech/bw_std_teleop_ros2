@@ -10,7 +10,7 @@ bw_teleop:
 
     bind_ip: 0.0.0.0
     port: 12345
-    single_client_lock_enabled: true
+    single_client_lock_enabled: false
     client_lock_timeout_sec: 3.0
     poll_period_ms: 2
     max_packets_per_cycle: 64
@@ -26,15 +26,23 @@ bw_teleop:
     topics.gripper_command_output: /gripper_controller/commands
     topics.lift_command_output: /lift_controller/commands
     topics.base_command_output: /base_controller/reference
+    topics.head_pose_output: /Teleop/head_pose
+    topics.control_active_output: /teleop/control_active
+    topics.reset_request_output: /kinematics/reset_arms
 
     joints.left_gripper: A_left_Degree8_joint
     joints.right_gripper: A_right_Degree8_joint
     joints.lift: C_joint
 
-    left_reset_position: [0.27, 0.25, -0.15]
+    left_reset_position: [0.329847758956320, 0.178995684237027, -0.263747491045859]
     left_reset_orientation: [0.0, 0.0, 0.0, 1.0]
-    right_reset_position: [0.27, -0.25, -0.15]
+    right_reset_position: [0.329847758956320, -0.179005303496523, -0.263747491045859]
     right_reset_orientation: [0.0, 0.0, 0.0, 1.0]
+    auto_reset_on_vr_connect: true
+    # 复位分步下发时长, 避免 IK 单周期步长门禁拒绝。
+    reset_duration_sec: 1.5
+    # 闭环复位最长持续时间, 超时后保持当前位姿。
+    reset_timeout_sec: 20.0
     workspace_min: [0.10, -0.80, -0.60]
     workspace_max: [0.90, 0.80, 0.50]
     relative_position_scale: 1.0
@@ -49,7 +57,10 @@ bw_teleop:
     base_speed_scales: [0.25, 0.50, 1.0]
     base_initial_gear: 0
 
-    lift_min: -0.231
-    lift_max: 0.231
-    lift_initial_position: 0.0
-    lift_jog_speed: 0.10
+    lift_min_mm: -500.0
+    lift_max_mm: 0.0
+    lift_initial_position_mm: -100.0
+    lift_jog_speed_mm_s: 200.0
+
+    head_min: [-0.524, -1.570, -0.349]
+    head_max: [0.785, 1.570, 0.349]

@@ -1,70 +1,80 @@
 # bw_std_description
 
-`bw_std_description` 是 Standard 机器人唯一的模型与硬件接口契约包，提供
-URDF/Xacro、mesh、RViz 配置和 `ros2_control` 描述。驱动、控制器、串口协议和
-业务节点不属于本包。
+Standard 机器人模型与 ros2_control 资源契约包:
 
-## 模型与接口
+- `urdf/standard.urdf`: 几何, joint origin, axis, 惯性与 visual/collision 真源.
+- `urdf/standard.xacro`: 真机与 Mock 组合入口.
+- `urdf/standard.ros2_control.xacro`: 统一 ros2_control joint/GPIO 接口.
+- `meshes/` 与显示 Launch.
 
-顶层模型为 `urdf/standard.xacro`。左右臂各 7 个关节、两侧主动夹爪
-`Degree8` 和升降 `C_joint` 导出位置命令及 position/velocity/effort 状态。
-`Degree9` 通过 `multiplier=1.0` mimic 对应的 `Degree8`。三个底盘轮为固定关节，
-底盘只通过 `base/vx`、`base/vy`、`base/wz` GPIO 接收机体速度命令。头部三轴
-保留在模型中，但当前不导出硬件接口。
+驱动, 编解码, 控制器, VR 输入与运动学算法不属于本包.
 
-`standard.xacro` 直接包含源模型副本 `standard.urdf`。该副本的 joint origin、
-axis 和所有 link visual/collision/inertial origin 与 `../standard/urdf/standard.urdf`
-一致；发布适配不得修改这些坐标。包 URI、运行限位、固定轮和夹爪 mimic 属于非坐标
-运行适配。
+## 模型契约
 
-真机与 mock 模型共用 command-only `base` GPIO 契约。Humble/Jazzy 的
-`mock_components/GenericSystem` 直接导出这三项命令接口；底盘没有状态接口，
-因此不会生成虚拟底盘或轮关节反馈。所有 `ros2_control` joint 都必须对应模型中的
-非固定 URDF joint，满足 Jazzy 的资源解析约束。
+- 运动学根 `C_Link`, 末端 `A_left_Degree7_link` / `A_right_Degree7_link`, 每侧 7 轴.
+- 每侧主动 `Degree8` 夹爪与 URDF mimic 驱动的 `Degree9`; `Degree9` 不导出独立硬件接口.
+- `C_joint` 限位 `[-0.5, 0.0] m`, ros2_control 初始值 `-0.1 m`; Teleop 内部使用
+  `-500..0 mm`, 默认 `-100 mm`, 在 ROS 边界转换.
+- 算法使用独立 reduced model `bw_kinematics/assets/standard_ik/standard_ik.urdf`, 锁定
+  `C_joint` 到 `0 m`; 两个模型的控制单位, 锁定语义与路径不得混用.
 
-## Xacro 参数
+`standard.ros2_control.xacro` 对真机选择 `bw_std_control/StandardSystemHardware`, 对 Mock
+选择 `mock_components/GenericSystem`, 两者使用相同的接口集合. Xacro 参数与默认值见
+`urdf/standard.xacro`, bringup launch 按部署覆盖运动与带宽限制.
 
-- `use_mock_hardware`：默认 `false`；`true` 使用
-  `mock_components/GenericSystem`。
-- `serial_port`、`baud_rate`、`feedback_timeout_ms`：V3 串口通信参数。
-- `power_on_on_activate`：默认 `false`，禁止激活时自动上电。
-- `arm_mapping_calibrated`：默认 `false`；未完成 Standard 逐轴映射标定时禁止上电。
-- 升降没有零偏或参考点 Xacro 参数；控制包仅进行 `mm <-> m` 单位换算，
-  `0 mm` 对应源 URDF `C_joint=0`，不修改本包的 URDF origin 或 axis。
-- `left_arm_motor_indices`、`right_arm_motor_indices`：Degree1 到 Degree7 对应的
-  V3 Motor 索引；未标定默认是 `0,1,2,3,4,5,6`，只用于掉电诊断。
-- `left_arm_direction`、`right_arm_direction`：Degree1 到 Degree7 的方向；未标定
-  默认全 `+1`，不代表 Standard 实机结论。
-- `left_arm_raw_zero_rad`、`right_arm_raw_zero_rad`：Degree1 到 Degree7 的 V3
-  原始零位数组，默认 `0,0,0,0,0,0,0`。
-- `arm_max_velocity_rad_s`、`pelvis_max_velocity_mm_s`、
-  `gripper_max_velocity_normalized_s`：默认 `0.05`、`20.0`、`0.2`，用于
-  commissioning 阶段的单周期增量限制。
+## ros2_control 接口
 
-展开并检查 mock 模型：
+17 个主动关节, 每个只提供 `position` command interface 与 `position`, `velocity`,
+`effort` state interface:
+
+```text
+C_joint
+A_left_Degree1_joint ... A_left_Degree7_joint
+A_right_Degree1_joint ... A_right_Degree7_joint
+A_left_Degree8_joint
+A_right_Degree8_joint
+```
+
+command-only GPIO, 不提供 state interface:
+
+```text
+base/vx, base/vy, base/wz
+head/pitch, head/yaw, head/roll
+safety/power
+```
+
+头部 command 顺序固定为 pitch, yaw, roll:
+
+```text
+pitch [-0.524, 0.785] rad   # ROS 侧; 固件侧 [-0.785, 0.524] 经固定 -1 变换的镜像
+yaw   [-1.570, 1.570] rad
+roll  [-0.349, 0.349] rad
+```
+
+`safety/power` 为 `0/1` 命令接口, 写入与超时语义由 `bw_std_control` 底盘控制器负责;
+固定底盘轮不导出虚构的轮关节反馈; 头部硬件状态不伪造.
+
+## 安全边界
+
+- 不通过修改 URDF origin, axis, TF 或放宽 joint limits 补偿电机映射.
+- `C_joint` 只在 ros2_control 边界使用米.
+- 默认不软件上电, 默认不自动激活运动控制器.
+- 头部限位必须包含安全零位 `0`.
+- 所有主动关节必须有有限, 有序的 position min/max.
+- 真机硬件插件校验 base/head/safety GPIO 的精确 command-only 资源契约.
+
+## 查看和静态检查
 
 ```bash
 xacro src/bw_std_description/urdf/standard.xacro use_mock_hardware:=true \
   | check_urdf /dev/stdin
-```
 
-显示模型：
-
-```bash
 ros2 launch bw_std_description display.launch.py
 ```
 
-## 安全与验证
+## 验证状态
 
-真机插件为 `bw_std_control/StandardSystemHardware`。首次运行必须保持
-`power_on_on_activate=false`、`arm_mapping_calibrated=false`，先核对完整反馈、
-关节名称、通道、方向、单位和限位，再由 bringup 分模块低速激活。头部在嵌入式
-契约完成前保持禁用。当前仅旧链路右臂经过有限真机验证，不代表整机经过大规模测试
-或达到生产就绪状态。
-
-运行包内契约测试：
-
-```bash
-colcon test --packages-select bw_std_description
-colcon test-result --verbose
-```
+- Humble 与 Jazzy Mock bringup 均加载 `standard.xacro`, GenericSystem, 17 个主动关节与
+  base/head command-only GPIO; KinematicsNode 以 `C_Link` 为根发布 FK.
+- Jazzy `xacro | check_urdf` 检查通过.
+- 真机逐轴映射标定, HIL 与低速 commissioning 未完成; 整机结论见 `bw_std_bringup` README.

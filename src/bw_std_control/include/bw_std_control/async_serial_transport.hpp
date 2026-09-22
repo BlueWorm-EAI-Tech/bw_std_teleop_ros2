@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "bw_std_control/v3_protocol.hpp"
+#include "bw_std_control/protocol.hpp"
 
 namespace bw_std_control
 {
@@ -32,9 +32,11 @@ public:
     DataCallback data_callback, ErrorCallback error_callback);
   void close() noexcept;
   bool is_open() const noexcept;
-  bool async_write(const V3CommandFrame & frame) noexcept;
-  bool async_write_power_off(const V3CommandFrame & frame) noexcept;
-  bool wait_for_power_off(std::chrono::milliseconds timeout) noexcept;
+  std::uint64_t async_write(const CommandFrame & frame) noexcept;
+  [[nodiscard]] bool write_completed(std::uint64_t sequence) const noexcept;
+  std::uint64_t async_write_power_off(const CommandFrame & frame) noexcept;
+  bool wait_for_power_off(
+    std::uint64_t sequence, std::chrono::milliseconds timeout) noexcept;
 
 private:
   class Impl;

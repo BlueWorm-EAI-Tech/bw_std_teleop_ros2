@@ -1,106 +1,149 @@
 # bw_teleop
 
-`bw_teleop` 是 Standard 机器人的单一 VR 遥操作包。正式运行只启动一个
-`bw_teleop` 节点：节点直接接收 PICO UDP 数据报，包内完成协议解析、输入映射、
-clutch 与 watchdog 编排，再发布标准 ROS 控制接口。本包不依赖自定义 VR 消息，
-也不通过 ROS Pose/Joy topic 串联内部阶段。
+Standard 单节点 PICO VR 遥操作包: 节点直接接收 UDP 数据报, 完成协议解析, 输入映射,
+owner/session 管理, clutch, 复位, 头部角度处理, watchdog 与命令发布; 不使用自定义 VR
+ROS message, 不通过 ROS Pose/Joy topic 串联内部阶段.
 
-## 架构与边界
+## 分层
 
 ```text
-UDP -> Node -> VrStreamManager -> TeleopManager -> PoseMapper
-              |                 |
-              +-> Parser/Input  +-> clutch/mode/watchdog/command routing
+UDP datagram
+    |
+    v
+BwTeleop Node
+    |
+    v
+VrStreamManager -> ClientSessionManager / VrPacketParser / VrInputMapper
+    |
+    v
+TeleopManager -> PoseMapper
 ```
 
-- `transport`：ROS-free UDP 数据报值类型。
-- `protocol`：ROS-free PICO 143 字节控制帧与 v3 路由封装解析。
-- `input`：ROS-free 四元数校验、摇杆死区和控制语义映射。
-- `manager`：单客户端 owner、模式、复位、clutch、watchdog 与命令编排。
-- `algorithm`：ROS-free 双臂位姿映射和工作空间限位。
-- `node`：非阻塞 UDP IO、ROS 参数、JointState 输入和命令发布。
+- `transport`: ROS-free UDP 数据报值类型.
+- `protocol`: PICO 控制帧解析.
+- `input`: 四元数, 模拟量与摇杆范围检查及死区映射.
+- `manager`: owner, timestamp, watchdog, SAFE_HOLD, 模式, 复位与命令编排.
+- `algorithm`: ROS-free 双臂位姿映射与工作空间限制.
+- `node`: 非阻塞 UDP, ROS 参数, JointState/实测位姿输入与命令发布.
 
-节点不发布 VR 私有消息、原始手柄 Pose/Joy 或头部命令。头显位姿仍随有效帧
-进入 watchdog，供未来头部语义使用；当前不读取任何头部关节测量。
+默认节点名与可执行文件均为 `bw_teleop`.
 
 ## 启动
 
 ```bash
-colcon build --packages-select bw_teleop --symlink-install
-source install/setup.bash
 ros2 launch bw_teleop bw_teleop.launch.py
 ```
 
-默认监听 `0.0.0.0:12345`。节点名、可执行文件和正式 launch 均为
-`bw_teleop`。`poll_period_ms=2`，每轮最多读取 64 个数据报，socket 使用
-`MSG_DONTWAIT`，不会阻塞 ROS executor。
+- `params_file`: 默认 `config/bw_teleop.yaml`.
+- `bind_ip`: `0.0.0.0`; `port`: `12345`; `poll_period_ms`: `2`;
+  `max_packets_per_cycle`: `64`; `publish_frequency_hz`: `90`.
 
-## 输入与输出
+## ROS 输入
 
-ROS 输入包括：
+- `/current_left_pose`, `/current_right_pose` (`geometry_msgs/msg/PoseStamped`):
+  `bw_kinematics` 实测末端 FK; 非空 `frame_id` 必须等于 `target_frame`(默认 `C_Link`).
+- `/joint_states` (`sensor_msgs/msg/JointState`): 按名称读取
+  `A_left_Degree8_joint`, `A_right_Degree8_joint` 与 `C_joint` (米).
 
-- `/current_left_pose`、`/current_right_pose`
-  (`geometry_msgs/msg/PoseStamped`)：由 `bw_kinematics` 提供的左右实测末端位姿。
-  非空 `frame_id` 必须等于 `target_frame`（默认 `C_Link`），否则整帧丢弃。
-- `/joint_states` (`sensor_msgs/msg/JointState`)：按名称读取以下关节：
+## ROS 输出
 
-- `A_left_Degree8_joint`、`A_right_Degree8_joint`：夹爪主动关节。
-- `C_joint`：升降关节。
+所有命令 publisher 使用 Reliable, Keep Last 1:
 
-ROS 输出均使用 Reliable、Keep Last 1：
+- `/target_left_pose`, `/target_right_pose` (`geometry_msgs/msg/PoseStamped`): `C_Link`
+  下末端目标.
+- `/gripper_controller/commands` (`std_msgs/msg/Float64MultiArray`):
+  `[A_left_Degree8_joint, A_right_Degree8_joint]`, 米.
+- `/lift_controller/commands` (`std_msgs/msg/Float64MultiArray`): `[C_joint]`, 米.
+- `/base_controller/reference` (`geometry_msgs/msg/TwistStamped`): 机体 `vx`, `vy`, `wz`.
+- `/Teleop/head_pose` (`sensor_msgs/msg/JointState`):
+  `name = [head_pitch_joint, head_yaw_joint, head_roll_joint]`,
+  `position = [pitch, yaw, roll]`, 弧度.
+- `/teleop/control_active` (`std_msgs/msg/Bool`): 每周期发布, `!safe_hold` 时为 `true`.
 
-- `/target_left_pose`、`/target_right_pose`
-  (`geometry_msgs/msg/PoseStamped`)，默认 frame 为 `C_Link`；对应 IK tip 为
-  `A_left_Degree7_link`、`A_right_Degree7_link`。相对模式首次按下 grip 时，必须
-  先收到该侧新鲜的 current pose，并以它作为机器人基线；不会使用 reset pose
-  替代测量基线。
-- `/gripper_controller/commands` (`std_msgs/msg/Float64MultiArray`)，顺序为
-  `[A_left_Degree8_joint, A_right_Degree8_joint]`。
-- `/lift_controller/commands` (`std_msgs/msg/Float64MultiArray`)，顺序为
-  `[C_joint]`。
-- `/base_controller/reference` (`geometry_msgs/msg/TwistStamped`)。
+双臂目标只在对应 clutch 有效且该侧实测末端新鲜时可发布. SAFE_HOLD 后停止双臂目标, 继续
+发布底盘零速与头部保持值, 并在反馈新鲜时发布夹爪与升降保持值.
 
-## 协议与输入语义
+## PICO 协议与输入校验
 
-控制 payload 固定为 143 字节、小端、magic `0x42575652`、version `1`。也支持
-`"BWVR" + version 3 + flags + SN length + SN + payload` 路由封装。解析器严格
-校验长度、布尔编码、有限值和四元数，并静默忽略完整 HandJoints v2 帧。
+直接控制 payload 固定 `143` 字节, 小端, magic `0x42575652`, version `1`; 同时支持
+`BWVR` version 3 路由封装, 完整 HandJoints v2 帧按协议语义忽略. 解析器校验长度, 布尔
+编码, 有限值, 四元数与控制字段.
 
-首个有效来源 IP 获得 owner；默认连续 `3s` 无有效帧后才允许其他 IP 接管。
-摇杆先应用 `input_joystick_deadzone=0.15` 线性死区映射。`grip` 控制对应手臂
-clutch，`trigger_value` 控制夹爪，左摇杆控制底盘平移，右摇杆控制偏航和升降。
-双侧 `AX+BY` 长按切换相对/绝对模式，单侧长按复位该臂，menu 长按复位双臂，
-右摇杆点击切换底盘速度档。
+- 四个摇杆轴必须在 `[-1, 1]` 且有限; trigger/grip 必须在 `[0, 1]` 且有限.
+- 头显与已连接手柄的位姿必须有限且四元数有效; 越界值不静默钳制.
+- `input_joystick_deadzone` 默认 `0.15` (输入映射阶段线性死区);
+  `command_joystick_deadzone` 默认 `0.08` (底盘与升降命令阶段再次死区).
 
-## Standard 限位与安全
+## Owner 和 timestamp
 
-- 夹爪范围：`0.0..0.04965m`。
-- 升降初值：源 URDF 零位 `0.0m`；范围：`[-0.231, 0.231]m`。收到完整反馈后
-  立即使用实测位置建立 measured-hold。
-- watchdog 默认 `200ms`。头显、任一手柄或任一控制器输入不完整/超时即进入
-  `SAFE_HOLD`，底盘立即归零，夹爪和升降保持最新有效测量值。
-- 双臂目标仅在对应 clutch 按下或触发显式复位的周期发布；释放 clutch 或进入
-  `SAFE_HOLD` 后停止发布，避免持续触发 IK 与新轨迹。
-- 任一 current pose 超过 `arm_pose_timeout_ms=200` 未刷新时，停止该侧目标输出
-  并撤销 clutch；反馈恢复后需重新建立 measured baseline。
-- 左右夹爪与升降三项反馈未全部到达，或任一反馈超过
-  `joint_state_timeout_ms=200` 未刷新时，不发布夹爪或升降命令。首次反馈按实测值
-  初始化 measured-hold。
-- 输入恢复后必须先释放双侧 grip，下一次按下才重新建立 clutch 基准。
-- 所有控制配置见 `config/bw_teleop.yaml`；topic、关节名和限位变更必须同步
-  检查 `bw_std_bringup` 与 controller 配置。
-- 所有运动参数与数组元素必须有限，超时必须为正数，min/max、reset pose、
-  workspace、速度档和初值必须满足范围约束；非法配置会拒绝节点启动，不会静默
-  交换、钳制或替换为默认值。
+- `single_client_lock_enabled` 启用时首个有效来源 IP 获得 owner, 默认
+  `client_lock_timeout_sec=3.0 s` 内拒绝其他来源; 超时未见的 owner 被释放.
+- 只有 parser, mapper, 时间戳与 owner 全部通过的帧才刷新 heartbeat.
+- 同一来源 sender timestamp 必须严格递增, 重复同样拒绝; 倒序或重复帧不延长 owner.
+- owner 切换或超时释放清除 timestamp 历史; 非 owner 非法帧不清除当前 owner 输入.
+- owner 或未锁定来源的非法帧清空 VR 输入并进入恢复流程.
 
-## 测试
+## 控制语义
 
-```bash
-colcon test --packages-select bw_teleop
-colcon test-result --verbose
+- 手柄 `grip` 控制对应手臂 clutch.
+- 相对模式首次按下 clutch 前必须有该侧新鲜 current pose, 以实测位姿建立基线.
+- 绝对模式以该侧 reset pose 加手柄位置生成目标, 最终按 workspace 限制.
+- 左右手柄同时长按 `AX+BY` 超过 `long_press_sec` 切换相对/绝对模式.
+- 单侧 `AX+BY` 长按复位对应手臂; 任一 menu 长按复位双臂.
+- trigger 映射夹爪 `0.0..0.04965 m`.
+- 左摇杆 `y` 前后, 左摇杆 `x` 横移, 右摇杆 `x` 偏航, 右摇杆 `y` 以 `mm/s` 调整升降.
+- 左摇杆点击复位头部零位; 右摇杆点击切换底盘速度档.
+
+## 升降和头部
+
+- 升降内部固定毫米: 范围 `[-500, 0] mm`, 初始 `-100 mm`, jog speed `200 mm/s`; ROS
+  输入从米转毫米, 输出从毫米转米; 不从启动姿态生成零偏.
+- 头部四元数转换为 `[pitch, yaw, roll]`; 首个有效样本建立零参考, 左摇杆点击把当前
+  展开角重设为零; watchdog, 无效头显, SAFE_HOLD 或断连恢复时保持最近一次有限且已夹紧
+  的命令, 恢复后先 re-anchor, 不跳回默认零位.
+- 头部限位: pitch `[-0.524, 0.785]`(ROS 侧; 固件侧 `[-0.785, 0.524]`, 固定 -1 变换的
+  镜像), yaw `[-1.570, 1.570]`, roll `[-0.349, 0.349]`; 不读取头部 state feedback.
+
+## 复位
+
+- VR 首次接入或断流恢复 (`auto_reset_on_vr_connect: true`) 时向 `/kinematics/reset_arms`
+  发一次 `Bool=true`, 由 KinematicsNode 下发 "实测关节 -> 零位" 的关节空间斜坡; teleop
+  自身不生成笛卡尔路点.
+- Reset 姿态为零关节角位姿 (`C_Link` 参考):
+  `[0.329847758956320, ±0.178995684237027/-0.179005303496523, -0.263747491045859]`,
+  姿态为单位四元数.
+- 未连接的一侧手柄不参与新鲜度判定 (只保持该侧构型), 可单手操作.
+
+## Watchdog 和反馈门控
+
+- `watchdog_timeout_ms=200`; 头显与左右手柄 pose/joy 任一缺失, 断连或过期即进入
+  SAFE_HOLD: 释放左右 clutch, 底盘零速, 头部保持最后有效值, 夹爪与升降在完整新鲜反馈
+  时保持实测值, 并要求恢复后先释放双侧 grip 再建立新基线.
+- 夹爪与升降反馈必须全部有效且在 `joint_state_timeout_ms=200` 内; 左右 current pose
+  分别在 `arm_pose_timeout_ms=200` 内.
+- 所有 topic, 范围, 超时, reset pose, workspace 与速度档参数在启动时检查, 非法配置
+  直接拒绝启动.
+
+## 关键默认值
+
+```yaml
+target_frame: C_Link
+base_frame_id: base_link
+single_client_lock_enabled: false  # 当前部署值; 置 true 时只接受首个来源 IP
+left_reset_position: [0.329847758956320, 0.178995684237027, -0.263747491045859]
+right_reset_position: [0.329847758956320, -0.179005303496523, -0.263747491045859]
+workspace_min: [0.10, -0.80, -0.60]
+workspace_max: [0.90, 0.80, 0.50]
+lift_min_mm: -500.0
+lift_max_mm: 0.0
+lift_initial_position_mm: -100.0
+head_min: [-0.524, -1.570, -0.349]
+head_max: [0.785, 1.570, 0.349]
+auto_reset_on_vr_connect: true
+topics.control_active_output: /teleop/control_active
+topics.reset_request_output: /kinematics/reset_arms
 ```
 
-单元测试覆盖直接/路由控制帧、HandJoints 忽略、单客户端锁、输入死区、
-Standard 夹爪与升降限位、首次 measured-hold、相对模式实测末端基线、反馈过期、
-非法参数拒绝、clutch/watchdog 停止目标，以及 watchdog 底盘归零。真机仍需逐
-模块低速验证双臂方向、夹爪开合、升降方向和底盘坐标符号。
+完整配置见 `config/bw_teleop.yaml`.
+
+

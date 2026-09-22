@@ -15,6 +15,10 @@
   <xacro:arg name="arm_max_velocity_rad_s" default="0.05"/>
   <xacro:arg name="pelvis_max_velocity_mm_s" default="20.0"/>
   <xacro:arg name="gripper_max_velocity_normalized_s" default="0.2"/>
+  <xacro:arg name="arm_startup_limit_tolerance_rad" default="0"/>
+  <xacro:arg name="gripper_startup_limit_tolerance_m" default="0"/>
+  <xacro:arg name="head_max_velocity_rad_s" default="1.0"/>
+  <xacro:arg name="command_rate_hz" default="200.0"/>
 
   <xacro:include filename="standard.urdf"/>
   <xacro:include filename="standard.ros2_control.xacro"/>
@@ -35,5 +39,9 @@
     right_arm_raw_zero_rad="$(arg right_arm_raw_zero_rad)"
     arm_max_velocity_rad_s="$(arg arm_max_velocity_rad_s)"
     pelvis_max_velocity_mm_s="$(arg pelvis_max_velocity_mm_s)"
-    gripper_max_velocity_normalized_s="$(arg gripper_max_velocity_normalized_s)"/>
+    gripper_max_velocity_normalized_s="$(arg gripper_max_velocity_normalized_s)"
+    arm_startup_limit_tolerance_rad="$(arg arm_startup_limit_tolerance_rad)"
+    gripper_startup_limit_tolerance_m="$(arg gripper_startup_limit_tolerance_m)"
+    head_max_velocity_rad_s="$(arg head_max_velocity_rad_s)"
+    command_rate_hz="$(arg command_rate_hz)"/>
 </robot>

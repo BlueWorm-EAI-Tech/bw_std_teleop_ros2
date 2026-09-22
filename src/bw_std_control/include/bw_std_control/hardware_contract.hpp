@@ -19,6 +19,8 @@ bool parse_arm_motor_indices_parameter(
   std::array<std::size_t, kArmJointCount> & values) noexcept;
 bool parse_arm_direction_parameter(
   std::string_view text, std::array<double, kArmJointCount> & values) noexcept;
+bool parse_bounded_nonnegative_parameter(
+  std::string_view text, double maximum, double & value) noexcept;
 bool arm_mapping_enables_software_power(
   bool power_on_requested, bool arm_mapping_calibrated) noexcept;
 

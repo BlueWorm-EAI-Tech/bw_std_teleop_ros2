@@ -107,6 +107,28 @@ bool parse_arm_direction_parameter(
   return true;
 }
 
+bool parse_bounded_nonnegative_parameter(
+  const std::string_view text, const double maximum, double & value) noexcept
+{
+  if (!std::isfinite(maximum) || maximum < 0.0 || text.empty()) {
+    return false;
+  }
+  try {
+    const std::string token{text};
+    std::size_t consumed = 0U;
+    const double parsed = std::stod(token, &consumed);
+    if (consumed != token.size() || !std::isfinite(parsed) ||
+      parsed < 0.0 || parsed > maximum)
+    {
+      return false;
+    }
+    value = parsed;
+    return true;
+  } catch (const std::exception &) {
+    return false;
+  }
+}
+
 bool arm_mapping_enables_software_power(
   const bool power_on_requested, const bool arm_mapping_calibrated) noexcept
 {

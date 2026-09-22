@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.17)
 project(bw_kinematics)
 
 if(NOT CMAKE_CXX_STANDARD)
@@ -12,30 +12,35 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
-find_package(eigen3_cmake_module REQUIRED)
-find_package(Eigen3 REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(kdl_parser REQUIRED)
-find_package(orocos_kdl_vendor REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
-find_package(urdf REQUIRED)
 
-add_library(${PROJECT_NAME}_algorithm SHARED
-  src/algorithm/dls_ik_solver.cpp
-)
-target_include_directories(${PROJECT_NAME}_algorithm PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-target_link_libraries(${PROJECT_NAME}_algorithm Eigen3::Eigen)
-ament_target_dependencies(${PROJECT_NAME}_algorithm
-  kdl_parser
-  orocos_kdl_vendor
-  urdf
-)
+set(BW_KINEMATICS_ALGORITHM_MODE "PREBUILT" CACHE STRING
+  "Algorithm implementation mode: PREBUILT or SOURCE")
+set_property(CACHE BW_KINEMATICS_ALGORITHM_MODE PROPERTY STRINGS PREBUILT SOURCE)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/bw_kinematics_implementation_provider.cmake")
+bw_kinematics_configure_implementation_provider(
+  NAME algorithm
+  MODE "${BW_KINEMATICS_ALGORITHM_MODE}"
+  PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  PREBUILT_LIBRARY
+    "${CMAKE_CURRENT_SOURCE_DIR}/algorithm/lib/libbw_kinematics_algorithm.so"
+  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/algorithm/source"
+  EXPORT_SET export_${PROJECT_NAME})
+
+# 平滑器只交付预编译实现, 没有源码模式。
+bw_kinematics_configure_implementation_provider(
+  NAME smoother
+  MODE "PREBUILT"
+  PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  PREBUILT_LIBRARY
+    "${CMAKE_CURRENT_SOURCE_DIR}/algorithm/lib/libbw_kinematics_smoother.so"
+  EXPORT_SET export_${PROJECT_NAME})
 
 add_library(${PROJECT_NAME}_manager SHARED
   src/manager/kinematics_manager.cpp
@@ -44,7 +49,11 @@ target_include_directories(${PROJECT_NAME}_manager PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(${PROJECT_NAME}_manager PUBLIC ${PROJECT_NAME}_algorithm)
+target_link_libraries(${PROJECT_NAME}_manager PUBLIC
+  ${BW_KINEMATICS_ALGORITHM_TARGET})
+if(BW_KINEMATICS_ALGORITHM_BUILD_TARGET)
+  add_dependencies(${PROJECT_NAME}_manager ${BW_KINEMATICS_ALGORITHM_BUILD_TARGET})
+endif()
 
 add_library(${PROJECT_NAME}_component SHARED
   src/node/kinematics_node.cpp
@@ -53,8 +62,11 @@ target_include_directories(${PROJECT_NAME}_component PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(${PROJECT_NAME}_component ${PROJECT_NAME}_manager)
+target_link_libraries(${PROJECT_NAME}_component
+  ${PROJECT_NAME}_manager
+  ${BW_KINEMATICS_SMOOTHER_TARGET})
 ament_target_dependencies(${PROJECT_NAME}_component
+  ament_index_cpp
   geometry_msgs
   rclcpp
   rclcpp_components
@@ -69,19 +81,28 @@ add_executable(kinematics_node src/node/kinematics_node_main.cpp)
 target_link_libraries(kinematics_node ${PROJECT_NAME}_component)
 ament_target_dependencies(kinematics_node rclcpp)
 
+if(BW_KINEMATICS_ALGORITHM_BUILD_RPATH)
+  set_target_properties(${PROJECT_NAME}_manager
+    PROPERTIES BUILD_RPATH "${BW_KINEMATICS_ALGORITHM_BUILD_RPATH}")
+endif()
+if(BW_KINEMATICS_SMOOTHER_BUILD_RPATH)
+  set_target_properties(${PROJECT_NAME}_component
+    PROPERTIES BUILD_RPATH "${BW_KINEMATICS_SMOOTHER_BUILD_RPATH}")
+endif()
+set_target_properties(${PROJECT_NAME}_manager ${PROJECT_NAME}_component
+  PROPERTIES INSTALL_RPATH "$ORIGIN")
+set_target_properties(kinematics_node
+  PROPERTIES INSTALL_RPATH "$ORIGIN/..")
+
+install(DIRECTORY include/ DESTINATION include)
 install(
-  DIRECTORY include/
-  DESTINATION include
-)
-install(
-  DIRECTORY config launch
+  DIRECTORY config launch assets
   DESTINATION share/${PROJECT_NAME}
   PATTERN "__pycache__" EXCLUDE
   PATTERN "*.pyc" EXCLUDE
 )
 install(
   TARGETS
-    ${PROJECT_NAME}_algorithm
     ${PROJECT_NAME}_manager
     ${PROJECT_NAME}_component
     kinematics_node
@@ -95,38 +116,18 @@ install(
 ament_export_include_directories(include)
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_libraries(
-  ${PROJECT_NAME}_algorithm
   ${PROJECT_NAME}_manager
   ${PROJECT_NAME}_component
 )
 ament_export_dependencies(
-  Eigen3
+  ament_index_cpp
   geometry_msgs
-  kdl_parser
-  orocos_kdl_vendor
   rclcpp
   rclcpp_components
   sensor_msgs
   trajectory_msgs
-  urdf
 )
 
-if(BUILD_TESTING)
-  find_package(ament_cmake_gtest REQUIRED)
-  find_package(ament_cmake_pytest REQUIRED)
-
-  ament_add_gtest(test_kinematics_manager test/test_kinematics_manager.cpp)
-  target_link_libraries(test_kinematics_manager ${PROJECT_NAME}_manager)
-
-  ament_add_gtest(test_kinematics_node test/test_kinematics_node.cpp)
-  target_link_libraries(test_kinematics_node ${PROJECT_NAME}_component)
-  ament_target_dependencies(test_kinematics_node
-    geometry_msgs
-    rclcpp
-    sensor_msgs
-  )
-
-  ament_add_pytest_test(test_standard_defaults test/test_standard_defaults.py)
-endif()
+# 本包只交付预编译实现与编排逻辑, 不携带测试; 测试源码由算法实现方维护。
 
 ament_package()

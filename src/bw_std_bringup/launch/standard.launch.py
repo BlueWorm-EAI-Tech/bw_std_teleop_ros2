@@ -17,6 +17,7 @@ MOTION_CONTROLLERS = (
     "gripper_controller",
     "lift_controller",
     "base_controller",
+    "head_controller",
 )
 
 
@@ -80,6 +81,14 @@ def generate_launch_description() -> LaunchDescription:
             LaunchConfiguration("pelvis_max_velocity_mm_s"),
             " gripper_max_velocity_normalized_s:=",
             LaunchConfiguration("gripper_max_velocity_normalized_s"),
+            " arm_startup_limit_tolerance_rad:=",
+            LaunchConfiguration("arm_startup_limit_tolerance_rad"),
+            " gripper_startup_limit_tolerance_m:=",
+            LaunchConfiguration("gripper_startup_limit_tolerance_m"),
+            " head_max_velocity_rad_s:=",
+            LaunchConfiguration("head_max_velocity_rad_s"),
+            " command_rate_hz:=",
+            LaunchConfiguration("command_rate_hz"),
         ]
     )
     robot_description = ParameterValue(robot_description_content, value_type=str)
@@ -92,7 +101,6 @@ def generate_launch_description() -> LaunchDescription:
         PythonLaunchDescriptionSource(
             str(kinematics_share / "launch" / "kinematics.launch.py")
         ),
-        launch_arguments={"robot_description": robot_description_content}.items(),
         condition=IfCondition(LaunchConfiguration("start_teleop")),
     )
 
@@ -124,11 +132,19 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "right_arm_raw_zero_rad", default_value="0,0,0,0,0,0,0"
             ),
-            DeclareLaunchArgument("arm_max_velocity_rad_s", default_value="0.05"),
-            DeclareLaunchArgument("pelvis_max_velocity_mm_s", default_value="20.0"),
+            DeclareLaunchArgument("arm_max_velocity_rad_s", default_value="12.0"),
+            DeclareLaunchArgument("pelvis_max_velocity_mm_s", default_value="200.0"),
             DeclareLaunchArgument(
-                "gripper_max_velocity_normalized_s", default_value="0.2"
+                "gripper_max_velocity_normalized_s", default_value="1.0"
             ),
+            DeclareLaunchArgument(
+                "arm_startup_limit_tolerance_rad", default_value="0"
+            ),
+            DeclareLaunchArgument(
+                "gripper_startup_limit_tolerance_m", default_value="0"
+            ),
+            DeclareLaunchArgument("head_max_velocity_rad_s", default_value="1.0"),
+            DeclareLaunchArgument("command_rate_hz", default_value="200.0"),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",

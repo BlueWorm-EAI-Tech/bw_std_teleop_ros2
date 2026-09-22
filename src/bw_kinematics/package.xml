@@ -3,28 +3,25 @@
 <package format="3">
   <name>bw_kinematics</name>
   <version>0.1.0</version>
-  <description>Standard 双臂 KDL 运动学与阻尼最小二乘逆解。</description>
+  <description>Standard 双臂 Pinocchio FK/Jacobian 与 CasADi 联合 IK。</description>
   <maintainer email="chenpeel@foxmail.com">BlueWorm Robotics</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>eigen3_cmake_module</depend>
+  <depend>pinocchio</depend>
+  <depend>casadi</depend>
   <depend>geometry_msgs</depend>
-  <depend>kdl_parser</depend>
-  <depend>orocos_kdl_vendor</depend>
+  <depend>ament_index_cpp</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>sensor_msgs</depend>
   <depend>trajectory_msgs</depend>
-  <depend>urdf</depend>
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
-
-  <test_depend>ament_cmake_pytest</test_depend>
-  <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

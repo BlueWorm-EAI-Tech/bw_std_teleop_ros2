@@ -48,8 +48,8 @@ struct WorkspaceLimits
 struct PoseMapperConfig
 {
   std::array<Pose, 2> reset_poses{
-    Pose{{0.27, 0.25, -0.15}, {}},
-    Pose{{0.27, -0.25, -0.15}, {}}};
+    Pose{{0.40, 0.25, -0.15}, {}},
+    Pose{{0.40, -0.25, -0.15}, {}}};
   WorkspaceLimits workspace;
   double relative_position_scale{1.0};
   double absolute_position_scale{1.0};
@@ -73,6 +73,8 @@ public:
     const Pose & measured_target, bool measured_target_valid) noexcept;
   void release_clutch(Side side) noexcept;
   void reset(Side side) noexcept;
+  // 直接设定目标(用于分步复位等内部序列), 同时重置相对运动基准。
+  void set_target(Side side, const Pose & pose) noexcept;
   Pose target(Side side) const noexcept;
 
 private:

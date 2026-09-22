@@ -11,6 +11,8 @@ controller_manager:
       type: position_controllers/JointGroupPositionController
     base_controller:
       type: bw_std_control/StandardBaseController
+    head_controller:
+      type: bw_std_control/StandardHeadController
 
 dual_arm_controller:
   ros__parameters:
@@ -50,3 +52,11 @@ base_controller:
     max_vx: 0.5
     max_vy: 0.5
     max_wz: 0.8
+
+head_controller:
+  ros__parameters:
+    command_timeout_sec: 0.2
+    command_topic: /Teleop/head_pose
+    safe_position: [0.0, 0.0, 0.0]
+    lower_limits: [-0.524, -1.570, -0.349]
+    upper_limits: [0.785, 1.570, 0.349]

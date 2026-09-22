@@ -7,11 +7,22 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)"
 SYSTEM_TOOLS_FILE="${SCRIPT_DIR}/dependencies/system_tools.txt"
 ROS_DEV_TOOLS_FILE="${SCRIPT_DIR}/dependencies/ros_dev_tools.txt"
 ROS_ROOT="${BW_ROS_ENV_SETUP_ROS_ROOT:-/opt/ros}"
+ROBOTPKG_PREFIX="${BW_ROS_ENV_SETUP_ROBOTPKG_PREFIX:-/opt/openrobots}"
+INSTALL_PREFIX="${BW_ROS_ENV_SETUP_INSTALL_PREFIX:-${ROBOTPKG_PREFIX}}"
+ROBOTPKG_DEB_BASE="${BW_ROS_ENV_SETUP_ROBOTPKG_DEB_BASE:-http://robotpkg.openrobots.org/packages/debian/pub}"
+ROBOTPKG_KEY_URL="${BW_ROS_ENV_SETUP_ROBOTPKG_KEY_URL:-http://robotpkg.openrobots.org/packages/debian/robotpkg.key}"
+ROBOTPKG_KEYRING_FILE="${BW_ROS_ENV_SETUP_ROBOTPKG_KEYRING_FILE:-/etc/apt/keyrings/robotpkg.asc}"
+ROBOTPKG_SOURCES_FILE="${BW_ROS_ENV_SETUP_ROBOTPKG_SOURCES_FILE:-/etc/apt/sources.list.d/robotpkg.list}"
+CASADI_PACKAGE="robotpkg-casadi"
 ZSHRC_FILE="${BW_ROS_ENV_SETUP_ZSHRC:-${HOME}/.zshrc}"
 ROSDEP_SOURCES_FILE="${BW_ROS_ENV_SETUP_ROSDEP_SOURCES_FILE:-/etc/ros/rosdep/sources.list.d/20-default.list}"
 FISHROS_URL="${BW_ROS_ENV_SETUP_FISHROS_URL:-https://fishros.com/install}"
+DEFAULT_ROSDISTRO_INDEX_URL="https://mirrors.tuna.tsinghua.edu.cn/rosdistro/index-v4.yaml"
+ROSDISTRO_INDEX_URL_VALUE=""
+CASADI_ROSDEP_KEY="casadi"
 ROS_TARGET_DISTRO=""
 UBUNTU_VERSION=""
+UBUNTU_CODENAME=""
 BUILD_BASE=""
 INSTALL_BASE=""
 LOG_BASE=""
@@ -25,8 +36,8 @@ usage() {
   ./scripts/local/ros_env_setup.sh --apply
 
 选项：
-  --check  只读检查 Ubuntu、ROS 2、ros2_control 和项目依赖
-  --apply  确认后安装依赖、配置 Zsh，并执行 colcon build
+  --check  只读检查 Ubuntu、ROS 2、ros2_control、Pinocchio 和 CasADi(robotpkg) 依赖
+  --apply  确认后安装依赖(含 robotpkg 提供的 CasADi 3.7)、配置 Zsh，并执行 colcon build
   --help   显示帮助
 EOF
 }
@@ -48,8 +59,8 @@ detect_target_distro() {
   [[ "${os_id}" == "ubuntu" ]] || die "不支持的系统：${os_id:-unknown}"
 
   case "${version_id}" in
-    "22.04") detected_distro="humble" ;;
-    "24.04") detected_distro="jazzy" ;;
+    "22.04") detected_distro="humble"; UBUNTU_CODENAME="jammy" ;;
+    "24.04") detected_distro="jazzy"; UBUNTU_CODENAME="noble" ;;
     *) die "仅支持 Ubuntu 22.04/Humble 或 Ubuntu 24.04/Jazzy，当前为 ${version_id:-unknown}" ;;
   esac
 
@@ -88,6 +99,16 @@ load_dependency_packages() {
   read_package_file "${ROS_DEV_TOOLS_FILE}" ROS_PACKAGES
 }
 
+# 解析并校验 rosdep 索引 URL，默认使用清华镜像，避免访问 raw.githubusercontent.com 超时。
+resolve_rosdistro_index_url() {
+  local configured_url="${BW_ROS_ENV_SETUP_ROSDISTRO_INDEX_URL:-${DEFAULT_ROSDISTRO_INDEX_URL}}"
+
+  if [[ ! "${configured_url}" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?/[^[:space:]]+$ ]]; then
+    die "rosdistro 索引 URL 非法，必须为包含主机和路径的完整 HTTPS URL"
+  fi
+  ROSDISTRO_INDEX_URL_VALUE="${configured_url}"
+}
+
 ros_is_ready() {
   [[ -f "${ROS_ROOT}/${ROS_TARGET_DISTRO}/setup.bash" ]] &&
     [[ -f "${ROS_ROOT}/${ROS_TARGET_DISTRO}/setup.zsh" ]]
@@ -124,15 +145,35 @@ check_ros_packages() {
   local package=""
   for package in \
     controller_manager hardware_interface joint_state_broadcaster \
-    joint_trajectory_controller kdl_parser position_controllers xacro
+    joint_trajectory_controller pinocchio position_controllers xacro
   do
     ros2 pkg prefix "${package}" >/dev/null 2>&1 || return 1
   done
 }
 
+casadi_is_ready() {
+  [[ -f "${INSTALL_PREFIX}/include/casadi/casadi.hpp" ]] &&
+    [[ -f "${INSTALL_PREFIX}/lib/cmake/casadi/casadi-config.cmake" ]] &&
+    [[ -f "${INSTALL_PREFIX}/lib/libcasadi.so.3.7" ]] &&
+    [[ -f "${INSTALL_PREFIX}/lib/libcasadi_nlpsol_sqpmethod.so.3.7" ]] &&
+    [[ -f "${INSTALL_PREFIX}/lib/libcasadi_conic_qrqp.so.3.7" ]] &&
+    casadi_uses_new_abi
+}
+
+# 预编译算法库按 _GLIBCXX_USE_CXX11_ABI=1 链接, 必须拒绝 old ABI 的 CasADi。
+casadi_uses_new_abi() {
+  local symbols=""
+
+  command -v nm >/dev/null 2>&1 || return 1
+  symbols="$(nm -D --defined-only "${INSTALL_PREFIX}/lib/libcasadi.so.3.7" 2>/dev/null || true)"
+  [[ "${symbols}" == *NSt7__cxx1112basic_string* ]]
+}
+
 check_rosdep_dependencies() {
+  export ROSDISTRO_INDEX_URL="${ROSDISTRO_INDEX_URL_VALUE}"
   rosdep check --from-paths "${REPO_ROOT}/src" --ignore-src \
-    --rosdistro "${ROS_TARGET_DISTRO}" >/dev/null 2>&1
+    --rosdistro "${ROS_TARGET_DISTRO}" \
+    --skip-keys "${CASADI_ROSDEP_KEY}" >/dev/null 2>&1
 }
 
 check_environment() {
@@ -143,9 +184,10 @@ check_environment() {
   report_check "构建工具（cmake/colcon/rosdep/zsh）" check_build_tools || missing=1
   if ros_is_ready; then
     source_ros_environment
-    report_check "ros2_control、ROS 2 Controllers、KDL 与 xacro" check_ros_packages || missing=1
-    report_check "工作区 rosdep 依赖" check_rosdep_dependencies || missing=1
+    report_check "ros2_control、ROS 2 Controllers、Pinocchio 与 xacro" check_ros_packages || missing=1
+    report_check "工作区 rosdep 依赖（casadi 由本脚本负责）" check_rosdep_dependencies || missing=1
   fi
+  report_check "CasADi 3.7 核心库与 sqpmethod/qrqp 插件（robotpkg，${INSTALL_PREFIX}）" casadi_is_ready || missing=1
 
   if ((missing == 0)); then
     printf '[OK] 环境满足 Standard 遥操作工作区构建要求\n'
@@ -161,14 +203,16 @@ confirm_apply() {
 即将执行高风险系统操作：
   - 使用 sudo 更新 APT 并安装系统/ROS 依赖
   - ROS 缺失时下载并交互执行 FishROS 安装脚本
-  - 初始化或更新 rosdep
-  - 更新 ${ZSHRC_FILE} 中带边界标记的项目环境区块
+  - 初始化或更新 rosdep；casadi 无上游 rosdep 规则，由脚本显式 skip 并由 robotpkg 提供
+  - 写入 robotpkg APT 源并安装 ${CASADI_PACKAGE}(CasADi 3.7 二进制)到 ${ROBOTPKG_PREFIX}
+  - 更新 ${ZSHRC_FILE} 中带边界标记的项目环境区块（CASADIPATH/LD_LIBRARY_PATH/CMAKE_PREFIX_PATH）
   - 使用发行版隔离目录执行 colcon build --symlink-install
     build:   ${BUILD_BASE}
     install: ${INSTALL_BASE}
     log:     ${LOG_BASE}
 
 FishROS 是未固定版本和校验和的第三方远程安装器，请确认网络与脚本来源可信。
+robotpkg 签名密钥只能通过明文 http 获取，请在可信网络下执行。
 确认继续请输入 APPLY：
 EOF
   IFS= read -r confirmation || true
@@ -204,9 +248,51 @@ install_rosdep_dependencies() {
   if [[ ! -f "${ROSDEP_SOURCES_FILE}" ]]; then
     sudo rosdep init
   fi
-  rosdep update --rosdistro "${ROS_TARGET_DISTRO}"
+  export ROSDISTRO_INDEX_URL="${ROSDISTRO_INDEX_URL_VALUE}"
+  rosdep update
   rosdep install --from-paths "${REPO_ROOT}/src" --ignore-src -r -y \
-    --rosdistro "${ROS_TARGET_DISTRO}"
+    --rosdistro "${ROS_TARGET_DISTRO}" \
+    --skip-keys "${CASADI_ROSDEP_KEY}"
+}
+
+robotpkg_source_is_ready() {
+  [[ -r "${ROBOTPKG_KEYRING_FILE}" && -r "${ROBOTPKG_SOURCES_FILE}" ]] &&
+    grep -Fq "signed-by=${ROBOTPKG_KEYRING_FILE}" "${ROBOTPKG_SOURCES_FILE}" &&
+    grep -Fq " ${UBUNTU_CODENAME} robotpkg" "${ROBOTPKG_SOURCES_FILE}"
+}
+
+configure_robotpkg_source() {
+  robotpkg_source_is_ready && return 0
+  sudo install -d -m 0755 "$(dirname -- "${ROBOTPKG_KEYRING_FILE}")" \
+    "$(dirname -- "${ROBOTPKG_SOURCES_FILE}")"
+  curl --fail --location "${ROBOTPKG_KEY_URL}" |
+    sudo tee "${ROBOTPKG_KEYRING_FILE}" >/dev/null
+  printf 'deb [arch=amd64 signed-by=%s] %s %s robotpkg\n' \
+    "${ROBOTPKG_KEYRING_FILE}" "${ROBOTPKG_DEB_BASE}" "${UBUNTU_CODENAME}" |
+    sudo tee "${ROBOTPKG_SOURCES_FILE}" >/dev/null
+}
+
+install_casadi() {
+  if casadi_is_ready; then
+    printf '[跳过] CasADi 3.7 已就绪：%s\n' "${INSTALL_PREFIX}"
+    return 0
+  fi
+  if [[ "${INSTALL_PREFIX}" != "${ROBOTPKG_PREFIX}" ]]; then
+    die "CasADi 3.7 只由 robotpkg 提供，固定前缀 ${ROBOTPKG_PREFIX}，当前 ${INSTALL_PREFIX} 无 3.7 库"
+  fi
+
+  configure_robotpkg_source
+  sudo apt-get update
+  sudo apt-get install -y "${CASADI_PACKAGE}"
+  casadi_is_ready ||
+    die "${CASADI_PACKAGE} 安装后未在 ${ROBOTPKG_PREFIX} 找到 CasADi 3.7 (含 sqpmethod/qrqp 插件与 new ABI)"
+  printf '[OK] CasADi 3.7 (%s) 已安装到 %s\n' "${CASADI_PACKAGE}" "${ROBOTPKG_PREFIX}"
+}
+
+export_casadi_environment() {
+  export CASADIPATH="${INSTALL_PREFIX}/lib"
+  export LD_LIBRARY_PATH="${INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
+  export CMAKE_PREFIX_PATH="${INSTALL_PREFIX}:${CMAKE_PREFIX_PATH:-}"
 }
 
 configure_zsh_environment() {
@@ -217,6 +303,12 @@ configure_zsh_environment() {
   local end_count=0
   local escaped_ros_setup=""
   local escaped_workspace_setup=""
+  local escaped_install_prefix=""
+  local escaped_install_lib=""
+  local escaped_rosdistro_index_url=""
+
+  [[ -n "${ROSDISTRO_INDEX_URL_VALUE}" ]] || resolve_rosdistro_index_url
+  printf -v escaped_rosdistro_index_url '%q' "${ROSDISTRO_INDEX_URL_VALUE}"
 
   mkdir -p "$(dirname -- "${ZSHRC_FILE}")"
   touch "${ZSHRC_FILE}"
@@ -228,6 +320,8 @@ configure_zsh_environment() {
 
   printf -v escaped_ros_setup '%q' "${ROS_ROOT}/${ROS_TARGET_DISTRO}/setup.zsh"
   printf -v escaped_workspace_setup '%q' "${INSTALL_BASE}/setup.zsh"
+  printf -v escaped_install_prefix '%q' "${INSTALL_PREFIX}"
+  printf -v escaped_install_lib '%q' "${INSTALL_PREFIX}/lib"
   temporary_file="$(mktemp "${ZSHRC_FILE}.tmp.XXXXXX")"
   awk -v start="${start_marker}" -v end="${end_marker}" '
     $0 == start { skipping = 1; next }
@@ -238,7 +332,12 @@ configure_zsh_environment() {
   cat >> "${temporary_file}" <<EOF
 ${start_marker}
 export ROS_DISTRO=${ROS_TARGET_DISTRO}
+export BW_ROS_ENV_SETUP_INSTALL_PREFIX=${escaped_install_prefix}
+export ROSDISTRO_INDEX_URL=${escaped_rosdistro_index_url}
 source ${escaped_ros_setup}
+export CASADIPATH=${escaped_install_lib}
+export LD_LIBRARY_PATH=${escaped_install_lib}:\${LD_LIBRARY_PATH:-}
+export CMAKE_PREFIX_PATH=${escaped_install_prefix}:\${CMAKE_PREFIX_PATH:-}
 if [[ -f ${escaped_workspace_setup} ]]; then
   source ${escaped_workspace_setup}
 fi
@@ -266,6 +365,8 @@ apply_environment() {
   source_ros_environment
   install_ros_dependencies
   install_rosdep_dependencies
+  install_casadi
+  export_casadi_environment
   configure_zsh_environment
   check_environment
   build_workspace
@@ -277,11 +378,13 @@ main() {
   case "${mode}" in
     --check)
       detect_target_distro
+      resolve_rosdistro_index_url
       load_dependency_packages
       check_environment
       ;;
     --apply)
       detect_target_distro
+      resolve_rosdistro_index_url
       load_dependency_packages
       confirm_apply
       apply_environment
