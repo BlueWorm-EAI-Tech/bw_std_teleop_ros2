@@ -50,7 +50,7 @@
       <xacro:standard_position_joint joint_name="A_left_Degree1_joint" lower="-2.069" upper="1.022"/>
       <xacro:standard_position_joint joint_name="A_left_Degree2_joint" lower="-0.142" upper="2.077"/>
       <xacro:standard_position_joint joint_name="A_left_Degree3_joint" lower="-1.541" upper="1.541"/>
-      <xacro:standard_position_joint joint_name="A_left_Degree4_joint" lower="-0.529" upper="1.355"/>
+      <xacro:standard_position_joint joint_name="A_left_Degree4_joint" lower="-0.529" upper="1.45"/>
       <xacro:standard_position_joint joint_name="A_left_Degree5_joint" lower="-1.540" upper="1.540"/>
       <xacro:standard_position_joint joint_name="A_left_Degree6_joint" lower="-0.756" upper="0.756"/>
       <xacro:standard_position_joint joint_name="A_left_Degree7_joint" lower="-1.017" upper="1.018"/>
@@ -58,7 +58,7 @@
       <xacro:standard_position_joint joint_name="A_right_Degree1_joint" lower="-2.069" upper="1.022"/>
       <xacro:standard_position_joint joint_name="A_right_Degree2_joint" lower="-2.077" upper="0.142"/>
       <xacro:standard_position_joint joint_name="A_right_Degree3_joint" lower="-1.541" upper="1.541"/>
-      <xacro:standard_position_joint joint_name="A_right_Degree4_joint" lower="-0.529" upper="1.355"/>
+      <xacro:standard_position_joint joint_name="A_right_Degree4_joint" lower="-0.529" upper="1.45"/>
       <xacro:standard_position_joint joint_name="A_right_Degree5_joint" lower="-1.540" upper="1.540"/>
       <xacro:standard_position_joint joint_name="A_right_Degree6_joint" lower="-0.756" upper="0.756"/>
       <xacro:standard_position_joint joint_name="A_right_Degree7_joint" lower="-1.017" upper="1.018"/>
