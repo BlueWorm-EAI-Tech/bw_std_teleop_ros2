@@ -12,7 +12,7 @@ constexpr std::uint8_t kHeader0 = 0x55;
 constexpr std::uint8_t kHeader1 = 0xAA;
 constexpr std::uint8_t kCommandType = 0x01;
 constexpr std::uint8_t kFeedbackType = 0x02;
-// 控制字位定义(与 standard_0907 一致): bit0 软件上电, bit2 底盘, bit3 左臂, bit4 右臂, bit5 头部。
+// 控制字位定义: bit0 软件上电, bit2 底盘, bit3 左臂, bit4 右臂, bit5 头部。
 constexpr std::uint8_t kControlSoftwarePower = 0x01U;
 constexpr std::uint8_t kControlChassis = 0x04U;
 constexpr std::uint8_t kControlLeftArm = 0x08U;
